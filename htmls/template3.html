@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Reconstruction Results Viewer</title>
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.159.0/examples/jsm/"
+      }
+    }
+    </script>
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        #results-container { display: flex; flex-wrap: wrap; justify-content: space-around; }
+        .result-item { 
+            width: calc(33.33% - 10px); /* Adjusted to fit three items per row */
+            margin: 5px; /* Reduced margin */
+            padding: 5px; /* Reduced padding */
+            border: 1px solid #ccc; 
+            box-sizing: border-box;
+        }
+        .input-images { 
+            display: flex; 
+            justify-content: space-between; 
+            height: 80px; /* Further reduced height */
+            gap: 5px; /* Reduced gap */
+            margin-bottom: 5px; /* Reduced margin */
+        }
+        .image-container {
+            width: 48%;
+            height: 100%;
+            overflow: hidden;
+            position: relative;
+        }
+        .image-container img { 
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .reconstruction-view { 
+            width: 100%; 
+            height: 120px; /* Further reduced height */
+            position: relative;
+        }
+        #controls { 
+            position: fixed; 
+            top: 5px; 
+            left: 5px; 
+            background: rgba(255,255,255,0.8); 
+            padding: 5px; 
+            border-radius: 3px; 
+            z-index: 1000;
+        }
+        #score-filter { margin-top: 5px; }
+        #pagination { display: flex; justify-content: center; margin-top: 10px; }
+        #pagination button { margin: 0 3px; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <label for="items-per-page">Items per page:</label>
+        <input type="number" id="items-per-page" min="1" max="200" value="60"> <!-- Increased default value -->
+        <div id="score-filter">
+            <label for="min-score">Min Score:</label>
+            <input type="number" id="min-score" step="0.01" value="0">
+            <label for="max-score">Max Score:</label>
+            <input type="number" id="max-score" step="0.01" value="1">
+            <button id="apply-filter">Apply Filter</button>
+        </div>
+    </div>
+    <div id="results-container"></div>
+    <div id="pagination">
+        <button id="prev-page">&lt; Previous</button>
+        <span id="page-info"></span>
+        <button id="next-page">Next &gt;</button>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // Mock data - replace this with your actual data loading mechanism
+        const mockData = [
+        // ... (keep the existing mockData array)
+        ];
+
+        let currentPage = 1;
+        let itemsPerPage = 60; // Increased default items per page
+        let filteredData = [...mockData];
+
+        const resultsContainer = document.getElementById('results-container');
+        const itemsPerPageInput = document.getElementById('items-per-page');
+        const minScoreInput = document.getElementById('min-score');
+        const maxScoreInput = document.getElementById('max-score');
+        const applyFilterButton = document.getElementById('apply-filter');
+        const prevPageButton = document.getElementById('prev-page');
+        const nextPageButton = document.getElementById('next-page');
+        const pageInfo = document.getElementById('page-info');
+
+        // Maps to keep track of renderers and observers
+        const reconstructionRenderers = new Map(); // Map from item.id to renderer data
+        const itemsMap = {}; // Map from item.id to item data
+
+        function createResultItem(item) {
+            const resultItem = document.createElement('div');
+            resultItem.className = 'result-item';
+            resultItem.innerHTML = `
+                <div class="input-images">
+                    <div class="image-container">
+                        <img src="${item.inputImage1}" alt="Input 1">
+                    </div>
+                    <div class="image-container">
+                        <img src="${item.inputImage2}" alt="Input 2">
+                    </div>
+                </div>
+                <div class="reconstruction-view" id="reconstruction-${item.id}" data-id="${item.id}"></div>
+                <p>Score: ${item.score.toFixed(2)}</p>
+            `;
+            return resultItem;
+        }
+
+        // ... (keep the rest of the JavaScript code unchanged)
+
+        // Initial load
+        loadResults();
+    </script>
+
+</body>
+</html>

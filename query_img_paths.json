@@ -1,0 +1,48 @@
+{
+    "query_img_paths": [
+      {
+        "path": "/viscam/projects/sfs/mast3r_outputs/test2/downloaded_images_20240903_124107/photo_of_a_red_car/image_3530906.jpg",
+        "description": "car"
+      },
+      {
+        "path": "/viscam/projects/sfs/mast3r_outputs/test2/downloaded_images_20240903_124107/photo_of_a_red_apple/image_11215164.jpg",
+        "description": "apple"
+      },
+      {
+        "path": "/viscam/projects/sfs/mast3r_outputs/test2/downloaded_images_20240903_124107/photo_of_a_white_dog/image_3539730.jpg",
+        "description": "dog"
+      },
+      {
+        "path": "/viscam/projects/sfs/mast3r_outputs/test2/downloaded_images_20240903_124107/photo_of_a_white_cat/image_7422314.jpg",
+        "description": "cat"
+      },
+      {
+        "path": "/viscam/projects/sfs/mast3r_outputs/test2/downloaded_images_20240903_124107/photo_of_white_dishes/image_1962815.jpg",
+        "description": "dishes"
+      },
+      {
+        "path": "/viscam/projects/sfs/mast3r_outputs/test2/downloaded_images_20240903_124107/photo_of_a_house/image_7710261.jpg",
+        "description": "house"
+      },
+      {
+        "path": "/viscam/projects/sfs/mast3r_outputs/test2/downloaded_images_20240903_124107/photo_of_a_firetruck/image_7930540.jpg",
+        "description": "firetruck"
+      },
+      {
+        "path": "/viscam/projects/sfs/mast3r_outputs/test2/downloaded_images_20240903_124107/photo_of_a_yellow_banana/image_12385694.jpg",
+        "description": "banana"
+      },
+      {
+        "path": "/viscam/projects/sfs/mast3r_outputs/test2/downloaded_images_20240903_124107/photo_of_a_white_car/image_4403960.jpg",
+        "description": "white car"
+      },
+      {
+        "path": "/viscam/projects/sfs/mast3r_outputs/test2/downloaded_images_20240903_124107/photo_of_a_white_bicycle/image_4793997.jpg",
+        "description": "white bicycle"
+      },
+      {
+        "path": "/viscam/projects/sfs/mast3r_outputs/test2/downloaded_images_20240903_124107/photo_of_a_boy/image_7427851.jpg",
+        "description": "boy"
+      }
+    ]
+  }

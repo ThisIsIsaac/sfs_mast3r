@@ -1,0 +1,1 @@
+{"index_key": "HNSW15", "index_param": "efSearch=934", "index_path": "/viscam/u/iamisaac/sfs/co3d_embeddings/final4/image.index", "size in bytes": 11577106, "avg_search_speed_ms": 5.9499259023433515, "99p_search_speed_ms": 8.76065650954844, "reconstruction error %": 0.0, "nb vectors": 3609, "vectors dimension": 768, "compression ratio": 0.9576528020042314}
