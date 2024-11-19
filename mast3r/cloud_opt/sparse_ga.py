@@ -540,8 +540,8 @@ def forward_mast3r(pairs, model, cache_path, desc_conf='desc_conf',
         path_corres2 = cache_path + f'/corres_conf={desc_conf}_{subsample=}/{idx2}-{idx1}.pth'
 
         if os.path.isfile(path_corres2) and not os.path.isfile(path_corres):
-            score, (xy1, xy2, confs) = torch.load(path_corres2)
-            torch.save((score, (xy2, xy1, confs)), path_corres)
+            score, (xy1, xy2, confs), cached_descs = torch.load(path_corres2)
+            torch.save((score, (xy2, xy1, confs), cached_descs), path_corres)
 
         if not all(os.path.isfile(p) for p in (path1, path2, path_corres)):
             if model is None:
@@ -549,8 +549,8 @@ def forward_mast3r(pairs, model, cache_path, desc_conf='desc_conf',
             res = symmetric_inference(model, img1, img2, device=device)
             X11, X21, X22, X12 = [r['pts3d'][0] for r in res]
             C11, C21, C22, C12 = [r['conf'][0] for r in res]
-            descs = [r['desc'][0] for r in res]
-            qonfs = [r[desc_conf][0] for r in res]
+            descs = [r['desc'][0] for r in res] # feat11, feat21, feat22, feat12
+            qonfs = [r[desc_conf][0] for r in res] # qonf11, qonf21, qonf22, qonf12
 
             # save
             torch.save(to_cpu((X11, C11, X21, C21)), mkdir_for(path1))
@@ -567,11 +567,12 @@ def forward_mast3r(pairs, model, cache_path, desc_conf='desc_conf',
             saves below in cached file at path_corres: 
             [
                 [conf_score, sum of point-wise conf, number of mutual nn pairs],
-                [xy1, xy2, point-wise conf]
+                [xy1, xy2, point-wise conf],
+                [feat11, feat21, feat22, feat12],
             ]
             """
             if cache_path is not None:
-                torch.save((matching_score, corres), mkdir_for(path_corres))
+                torch.save((matching_score, corres, descs), mkdir_for(path_corres))
 
         res_paths[img1['instance'], img2['instance']] = (path1, path2), path_corres
 
@@ -729,7 +730,7 @@ def prepare_canonical_data(imgs, tmp_pairs, subsample, order_imgs=False, min_con
 
 
 def load_corres(path_corres, device, min_conf_thr):
-    score, (xy1, xy2, confs) = torch.load(path_corres, map_location=device)
+    score, (xy1, xy2, confs), _ = torch.load(path_corres, map_location=device)
     valid = confs > min_conf_thr if min_conf_thr else slice(None)
     # valid = (xy1 > 0).all(dim=1) & (xy2 > 0).all(dim=1) & (xy1 < 512).all(dim=1) & (xy2 < 512).all(dim=1)
     # print(f'keeping {valid.sum()} / {len(valid)} correspondences')

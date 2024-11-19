@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CLIP Scores Bar Graph Visualization</title>
+    <!-- Include D3.js library for data visualization -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* Basic styling for the page and charts */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            overflow-x: hidden; /* Prevent horizontal scrolling due to scaling */
+        }
+        .bar {
+            fill: steelblue;
+            cursor: pointer;
+        }
+        .bar.selected {
+            fill: lightgreen;
+        }
+        .bar:hover {
+            fill: darkorange;
+        }
+        .axis-label {
+            font-size: 12px;
+        }
+        /* Container for the image display */
+        #image-display {
+            margin-top: 30px;
+            text-align: center;
+            /* Adjust the height to accommodate larger images */
+            min-height: 600px;
+        }
+        #image-display img {
+            /* Remove max-width constraint */
+            max-width: none;
+            /* Increase image size by 50% */
+            transform: scale(1.5);
+            transform-origin: center top; /* Keep image centered */
+        }
+        /* Container for each phrase's chart */
+        .phrase-chart {
+            margin-bottom: 50px;
+        }
+        /* Dropdown selector styling */
+        #selector {
+            margin-bottom: 20px;
+        }
+        /* New style for the load data button */
+        #load-data-container {
+            margin-bottom: 20px;
+        }
+        #load-data-button {
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>CLIP Scores Bar Graph Visualization</h1>
+
+    <!-- Add a "Load Data" button -->
+    <div id="load-data-container">
+        <label for="load-data-button">Load JSON Data File:</label>
+        <input type="file" id="load-data-button" accept=".json">
+    </div>
+
+    <div id="selector"></div>
+    <div id="chart-container"></div>
+    <div id="image-display"></div>
+    <script>
+        // Initialize empty data array
+        let data = [];
+        let allPhrases = [];
+
+        // Function to handle file loading
+        document.getElementById('load-data-button').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const jsonData = JSON.parse(e.target.result);
+                        data = jsonData;
+
+                        // Extract all unique phrases
+                        const phrasesSet = new Set();
+                        data.forEach(item => {
+                            Object.keys(item.clip_scores).forEach(phrase => {
+                                phrasesSet.add(phrase);
+                            });
+                        });
+                        allPhrases = Array.from(phrasesSet);
+
+                        // Create the phrase selector
+                        createPhraseSelector(allPhrases, data);
+
+                    } catch (error) {
+                        console.error('Error parsing JSON:', error);
+                        alert('Error parsing JSON file. Please ensure the file is correctly formatted.');
+                    }
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        function createPhraseSelector(allPhrases, data) {
+            // Clear any existing selector and chart
+            d3.select('#selector').html('');
+            d3.select('#chart-container').html('');
+            d3.select('#image-display').html('');
+
+            // Create a dropdown menu
+            const selectorDiv = d3.select('#selector');
+
+            selectorDiv.append('label')
+                .attr('for', 'phrase-select')
+                .text('Select a phrase to visualize: ');
+
+            const select = selectorDiv.append('select')
+                .attr('id', 'phrase-select');
+
+            allPhrases.forEach(phrase => {
+                select.append('option')
+                    .attr('value', phrase)
+                    .text(phrase);
+            });
+
+            // Initial visualization
+            if (allPhrases.length > 0) {
+                createBarGraph(data, allPhrases[0]);
+            }
+
+            // Update visualization on selection change
+            select.on('change', function() {
+                const selectedPhrase = this.value;
+                d3.select('#chart-container').html(''); // Clear previous chart
+                createBarGraph(data, selectedPhrase);
+            });
+        }
+
+        function createBarGraph(data, phrase) {
+            // Filter data to include only items that have a score for the phrase
+            const phraseData = data.filter(item => item.clip_scores[phrase] !== undefined);
+
+            // Sort data by score for this phrase (ascending)
+            phraseData.sort((a, b) => a.clip_scores[phrase] - b.clip_scores[phrase]);
+
+            // Dimensions
+            const margin = {top: 40, right: 20, bottom: 60, left: 50};
+            const width = window.innerWidth - margin.left - margin.right - 40; // Adjust for padding
+            const height = 400 - margin.top - margin.bottom;
+
+            // Create SVG container
+            const svg = d3.select('#chart-container')
+                .append('div')
+                .attr('class', 'phrase-chart')
+                .append('svg')
+                .attr('width', width + margin.left + margin.right)
+                .attr('height', height + margin.top + margin.bottom);
+
+            const g = svg.append('g')
+                .attr('transform', `translate(${margin.left},${margin.top})`);
+
+            // X scale - images (indices)
+            const x = d3.scaleBand()
+                .domain(phraseData.map((d, i) => i))
+                .range([0, width])
+                .padding(0.1);
+
+            // Y scale - scores
+            const y = d3.scaleLinear()
+                .domain([0, d3.max(phraseData, d => d.clip_scores[phrase])])
+                .nice()
+                .range([height, 0]);
+
+            // X-axis
+            g.append('g')
+                .attr('transform', `translate(0,${height})`)
+                .call(d3.axisBottom(x).tickValues([])) // Hide tick labels
+                .append('text')
+                .attr('class', 'axis-label')
+                .attr('x', width / 2)
+                .attr('y', 40)
+                .attr('fill', '#000')
+                .style('text-anchor', 'middle')
+                .text('Images');
+
+            // Y-axis
+            g.append('g')
+                .call(d3.axisLeft(y))
+                .append('text')
+                .attr('class', 'axis-label')
+                .attr('transform', 'rotate(-90)')
+                .attr('x', -height / 2)
+                .attr('y', -40)
+                .attr('fill', '#000')
+                .style('text-anchor', 'middle')
+                .text('CLIP Score');
+
+            // Clear the image display when the chart is redrawn
+            d3.select('#image-display').html('');
+
+            // Bars
+            g.selectAll('.bar')
+                .data(phraseData)
+                .enter()
+                .append('rect')
+                .attr('class', d => {
+                    // Check if the image has the phrase selected
+                    if (d.selected_phrases && d.selected_phrases.includes(phrase)) {
+                        return 'bar selected';
+                    } else {
+                        return 'bar';
+                    }
+                })
+                .attr('x', (d, i) => x(i))
+                .attr('y', d => y(d.clip_scores[phrase]))
+                .attr('width', x.bandwidth())
+                .attr('height', d => height - y(d.clip_scores[phrase]))
+                .on('mouseover', function(event, d) {
+                    // Update the image display div with the image and score
+                    d3.select('#image-display').html(`
+                        <h3>Score: ${d.clip_scores[phrase].toFixed(3)}</h3>
+                        <img src="${d.image_path}" alt="Image Preview">
+                    `);
+                })
+                .on('mouseout', function() {
+                    // Optionally, you can keep the image displayed or clear it
+                    // To keep the image displayed, comment out the line below
+                    // d3.select('#image-display').html('');
+                });
+
+            // Title
+            svg.append('text')
+                .attr('x', (width + margin.left + margin.right) / 2)
+                .attr('y', margin.top / 2)
+                .attr('text-anchor', 'middle')
+                .attr('font-size', '16px')
+                .attr('font-weight', 'bold')
+                .text(`Phrase: "${phrase}"`);
+        }
+
+        // Redraw chart on window resize
+        window.addEventListener('resize', function() {
+            const selectedPhraseElement = document.getElementById('phrase-select');
+            if (selectedPhraseElement) {
+                const selectedPhrase = selectedPhraseElement.value;
+                if (selectedPhrase) {
+                    d3.select('#chart-container').html(''); // Clear previous chart
+                    createBarGraph(data, selectedPhrase);
+                }
+            }
+        });
+    </script>
+</body>
+</html> 

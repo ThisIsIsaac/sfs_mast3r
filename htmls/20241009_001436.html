@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Reconstruction Results Viewer</title>
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.159.0/examples/jsm/"
+      }
+    }
+    </script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            padding-top: 200px; /* Adjusted to prevent overlap */
+        }
+        #results-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-around;
+        }
+        .result-item { 
+            width: calc(33% - 10px); /* Adjusted to fit three items per row */
+            margin: 5px; /* Reduced margin */
+            padding: 5px; /* Reduced padding */
+            border: 1px solid #ccc; 
+            box-sizing: border-box;
+            position: relative;
+        }
+        .input-images { 
+            display: flex; 
+            justify-content: space-between; 
+            gap: 5px; /* Reduced gap */
+            margin-bottom: 5px; /* Reduced margin */
+        }
+        .image-container {
+            width: 48%;
+            max-height: 160px; /* Set max-height */
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .image-container img { 
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+        .reconstruction-view { 
+            width: 100%; 
+            height: 240px; /* Increased height */
+            position: relative;
+        }
+        #controls { 
+            position: fixed; 
+            top: 5px; 
+            left: 5px; 
+            background: rgba(255,255,255,0.8); 
+            padding: 5px; 
+            border-radius: 3px; 
+            z-index: 1000;
+            max-height: 90vh; /* Ensure controls don't overflow */
+            overflow-y: auto; /* Add scrollbar if needed */
+        }
+        #score-filter { margin-top: 5px; }
+        #pagination { 
+            display: flex; 
+            justify-content: center; 
+            margin-top: 10px; 
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        #pagination button { margin: 0 3px; }
+        #page-numbers {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-top: 5px;
+        }
+        #page-numbers button {
+            margin: 2px;
+            padding: 5px 10px;
+            cursor: pointer;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+        }
+        #page-numbers button.current-page {
+            background-color: #007bff;
+            color: white;
+            border-color: #007bff;
+            cursor: default;
+        }
+
+        /* Styles for the score table */
+        .score-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 5px;
+        }
+        .score-table th, .score-table td {
+            border:1px solid #ccc;
+            padding:3px;
+            text-align:center;
+            font-size:12px;
+        }
+        .score-table th {
+            width:50%;
+        }
+
+        /* Style for query text */
+        .query-text {
+            font-size:15px;
+            margin-top:5px;
+            margin-bottom:0px;
+        }
+
+        /* Styles for rating */
+        .rating-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 5px;
+        }
+        .rating-box {
+            width: 30px;
+            height: 30px;
+            border: 1px solid #ccc;
+            margin: 0 2px;
+            cursor: pointer;
+            background-color: #f0f0f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .rating-box.selected {
+            background-color: #ffd700;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <label for="items-per-page">Items per page:</label>
+        <input type="number" id="items-per-page" min="1" max="200" value="15">
+        <!-- Score Filters -->
+        <div id="score-filters" style="margin-top:5px;">
+            <!-- Filters will be generated dynamically -->
+        </div>
+        <button id="apply-filter" style="margin-top:5px;">Apply Filter</button>
+        <!-- Sorting controls -->
+        <div id="sorting-controls" style="margin-top:5px;">
+            <label for="sort-score">Sort by:</label>
+            <select id="sort-score">
+                <!-- Options will be populated dynamically -->
+            </select>
+            <label for="sort-order">Order:</label>
+            <select id="sort-order">
+                <option value="asc">Ascending</option>
+                <option value="desc">Descending</option>
+            </select>
+            <button id="apply-sorting">Sort</button>
+        </div>
+        <!-- Save Ratings button -->
+        <div style="margin-top:5px;">
+            <button id="save-ratings">Save Ratings</button>
+        </div>
+        <!-- Import Ratings button -->
+        <div style="margin-top:5px;">
+            <button id="import-ratings">Import Ratings</button>
+            <input type="file" id="file-input" accept=".json" style="display:none;">
+        </div>
+    </div>
+    <div id="results-container"></div>
+    <div id="pagination">
+        <button id="prev-page">&lt; Previous</button>
+        <button id="next-page">Next &gt;</button>
+        <!-- Page numbers will be inserted here -->
+        <div id="page-numbers"></div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        async function init() {
+            const dataFilePath = "data_20241009_001436.json"; // Replace with your JSON file path
+            let mockData = [];
+
+            try {
+                const response = await fetch(dataFilePath);
+                mockData = await response.json();
+            } catch (error) {
+                console.error('Error loading data:', error);
+            }
+
+            // Load user ratings from localStorage
+            let userRatings = JSON.parse(localStorage.getItem('userRatings')) || {};
+
+            // Merge userRatings into mockData
+            mockData.forEach(item => {
+                if (userRatings[item.id]) {
+                    item.userRating = userRatings[item.id];
+                }
+            });
+
+            let currentPage = 1;
+            let itemsPerPage = 15; // Default items per page
+            let filteredData = [...mockData];
+
+            const resultsContainer = document.getElementById('results-container');
+            const itemsPerPageInput = document.getElementById('items-per-page');
+            const applyFilterButton = document.getElementById('apply-filter');
+            const prevPageButton = document.getElementById('prev-page');
+            const nextPageButton = document.getElementById('next-page');
+            const pageInfo = document.getElementById('page-info');
+            const pageNumbersContainer = document.getElementById('page-numbers');
+
+            // Sorting controls
+            const sortScoreSelect = document.getElementById('sort-score');
+            const sortOrderSelect = document.getElementById('sort-order');
+            const applySortingButton = document.getElementById('apply-sorting');
+
+            // Save Ratings button
+            const saveRatingsButton = document.getElementById('save-ratings');
+            // Import Ratings button and file input
+            const importRatingsButton = document.getElementById('import-ratings');
+            const fileInput = document.getElementById('file-input');
+
+            // Score Filters container
+            const scoreFiltersContainer = document.getElementById('score-filters');
+
+            // Populate the sortScoreSelect options dynamically based on score names and add 'User Rating'
+            const scoreNamesSet = new Set();
+            mockData.forEach(item => {
+                item.score_names.forEach(name => scoreNamesSet.add(name));
+            });
+
+            // Add 'User Rating' to the sort options
+            const optionUserRating = document.createElement('option');
+            optionUserRating.value = 'userRating';
+            optionUserRating.textContent = 'User Rating';
+            sortScoreSelect.appendChild(optionUserRating);
+
+            // Create score filters and sorting options
+            scoreNamesSet.forEach(name => {
+                // Add to sort options
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = name;
+                sortScoreSelect.appendChild(option);
+
+                // Create score filter UI
+                const filterDiv = document.createElement('div');
+                filterDiv.style.marginTop = '5px';
+                filterDiv.innerHTML = `
+                    <strong>${name} Percentile Range:</strong><br>
+                    Min: <input type="number" id="min-${name}" value="0" min="0" max="100" step="1" style="width:50px;">
+                    Max: <input type="number" id="max-${name}" value="100" min="0" max="100" step="1" style="width:50px;">
+                `;
+                scoreFiltersContainer.appendChild(filterDiv);
+            });
+
+            function createResultItem(item) {
+                const resultItem = document.createElement('div');
+                resultItem.className = 'result-item';
+                
+                // Use score names from the item
+                const itemScoreNames = item.score_names;
+                
+                // Generate the score table HTML
+                let scoreTableHtml = '<table class="score-table">';
+                // Add table rows
+                for (const key of itemScoreNames) {
+                    const percentile = Math.round(item.scores[key + '_percentile']);
+                    const value = item.scores[key];
+                    const backgroundColor = getBackgroundColor(percentile);
+                    scoreTableHtml += `<tr>
+                        <th>${key}</th>
+                        <td style="background-color: ${backgroundColor};">${percentile}% (${value.toFixed(3)})</td>
+                    </tr>`;
+                }
+                scoreTableHtml += '</table>';
+
+                // Generate the query text HTML
+                const queryTextHtml = `<p class="query-text">${item.query_text}</p>`;
+
+                // Generate the rating HTML
+                const ratingHtml = createRatingHtml(item);
+
+                resultItem.innerHTML = `
+                    ${ratingHtml}
+                    <div class="input-images">
+                        <div class="image-container">
+                            <img src="${item.inputImage1}" alt="Input 1">
+                        </div>
+                        <div class="image-container">
+                            <img src="${item.inputImage2}" alt="Input 2">
+                        </div>
+                    </div>
+                    <div class="reconstruction-view" id="reconstruction-${item.id}" data-id="${item.id}"></div>
+                    ${scoreTableHtml}
+                    ${queryTextHtml}
+                `;
+                return resultItem;
+            }
+
+            // Function to compute background color based on percentile
+            function getBackgroundColor(percentile) {
+                const hue = (percentile / 100) * 120; // Hue from 0 (red) to 120 (green)
+                return `hsl(${hue}, 100%, 50%)`;
+            }
+
+            function createRatingHtml(item) {
+                const userRating = item.userRating || 0;
+                let ratingBoxes = '<div class="rating-container">';
+                for (let i = 5; i >= 1; i--) {
+                    const selectedClass = i === userRating ? 'selected' : '';
+                    ratingBoxes += `<div class="rating-box ${selectedClass}" data-value="${i}" data-item-id="${item.id}">${i}</div>`;
+                }
+                ratingBoxes += '</div>';
+                return ratingBoxes;
+            }
+
+            function loadResults() {
+                resultsContainer.innerHTML = '';
+                const startIndex = (currentPage - 1) * itemsPerPage;
+                const endIndex = startIndex + itemsPerPage;
+                const pageData = filteredData.slice(startIndex, endIndex);
+
+                pageData.forEach(item => {
+                    const resultItem = createResultItem(item);
+                    resultsContainer.appendChild(resultItem);
+                    initReconstructionView(item);
+                });
+
+                // Update pagination
+                updatePagination();
+
+                // Add event listeners for rating boxes
+                const ratingBoxes = document.querySelectorAll('.rating-box');
+                ratingBoxes.forEach(box => {
+                    box.addEventListener('click', handleRatingClick);
+                });
+            }
+
+            function updatePagination() {
+                const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+                pageNumbersContainer.innerHTML = '';
+
+                for (let i = 1; i <= totalPages; i++) {
+                    const pageButton = document.createElement('button');
+                    pageButton.textContent = i;
+                    if (i === currentPage) {
+                        pageButton.classList.add('current-page');
+                        pageButton.disabled = true;
+                    }
+                    pageButton.addEventListener('click', () => {
+                        currentPage = i;
+                        loadResults();
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                    });
+                    pageNumbersContainer.appendChild(pageButton);
+                }
+
+                prevPageButton.disabled = currentPage === 1;
+                nextPageButton.disabled = currentPage === totalPages;
+            }
+
+            function handleRatingClick(event) {
+                const box = event.currentTarget;
+                const value = parseInt(box.getAttribute('data-value'), 10);
+                const itemId = box.getAttribute('data-item-id');
+
+                // Update the userRating in mockData
+                const item = mockData.find(item => item.id == itemId);
+                if (item) {
+                    item.userRating = value;
+                }
+
+                // Update userRatings
+                userRatings[itemId] = value;
+
+                // Save the updated ratings to localStorage
+                localStorage.setItem('userRatings', JSON.stringify(userRatings));
+
+                // Update the UI
+                const parent = box.parentElement;
+                const boxes = parent.querySelectorAll('.rating-box');
+                boxes.forEach(b => b.classList.remove('selected'));
+                box.classList.add('selected');
+            }
+
+            // Function to save ratings to a JSON file, including the data file path and timestamp
+            function saveRatingsToFile() {
+                const now = new Date();
+                const timestampStr = now.toISOString();
+                const timestamp = `${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2,'0')}${now.getDate().toString().padStart(2,'0')}_${now.getHours().toString().padStart(2,'0')}${now.getMinutes().toString().padStart(2,'0')}${now.getSeconds().toString().padStart(2,'0')}`;
+
+                const dataToSave = {
+                    dataFilePath: dataFilePath,
+                    timestamp: timestampStr,
+                    userRatings: userRatings
+                };
+
+                const dataStr = JSON.stringify(dataToSave, null, 2);
+                const blob = new Blob([dataStr], {type: 'application/json'});
+
+                const filename = `user_ratings_${timestamp}.json`;
+
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+
+            saveRatingsButton.addEventListener('click', () => {
+                saveRatingsToFile();
+            });
+
+            // Import Ratings functionality
+            importRatingsButton.addEventListener('click', () => {
+                fileInput.click();
+            });
+
+            fileInput.addEventListener('change', handleFileSelect);
+
+            function handleFileSelect(event) {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        try {
+                            const data = JSON.parse(e.target.result);
+                            if (data.userRatings) {
+                                // Update the userRatings in localStorage and in mockData
+                                const importedRatings = data.userRatings;
+
+                                // Merge the imported ratings into userRatings and mockData
+                                Object.keys(importedRatings).forEach(id => {
+                                    const rating = importedRatings[id];
+                                    // Update in userRatings
+                                    userRatings[id] = rating;
+                                    // Update in mockData
+                                    const item = mockData.find(item => item.id == id);
+                                    if (item) {
+                                        item.userRating = rating;
+                                    }
+                                });
+                                // Save updated ratings to localStorage
+                                localStorage.setItem('userRatings', JSON.stringify(userRatings));
+                                // Reload the results to reflect the updated ratings
+                                loadResults();
+                                alert('Ratings imported successfully.');
+                            } else {
+                                alert('Invalid ratings file.');
+                            }
+                        } catch (error) {
+                            console.error('Error parsing ratings file:', error);
+                            alert('Error parsing ratings file.');
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            }
+
+            function initReconstructionView(item) {
+                const container = document.getElementById(`reconstruction-${item.id}`);
+                const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+                renderer.setSize(container.clientWidth, container.clientHeight);
+                container.appendChild(renderer.domElement);
+
+                const scene = new THREE.Scene();
+
+                const camera = new THREE.PerspectiveCamera(
+                    45,
+                    container.clientWidth / container.clientHeight,
+                    0.01,
+                    1000
+                );
+
+                const controls = new OrbitControls(camera, renderer.domElement);
+
+                // Adjust controls settings
+                controls.enableDamping = true; // Enable inertia
+                controls.dampingFactor = 0.1; // Damping inertia
+                controls.zoomSpeed = 1.2; // Adjust zoom speed
+                controls.minDistance = 0.01; // Minimum zoom distance
+                controls.maxDistance = 1000; // Maximum zoom distance
+                controls.screenSpacePanning = true; // Enable consistent panning
+
+                const ambientLight = new THREE.AmbientLight(0x404040, 2);
+                scene.add(ambientLight);
+
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+                scene.add(directionalLight);
+
+                const loader = new GLTFLoader();
+                loader.load(
+                    item.reconstructionFile,
+                    gltf => {
+                        const model = gltf.scene;
+                        scene.add(model);
+
+                        // Compute the bounding box of the model
+                        const box = new THREE.Box3().setFromObject(model);
+                        const size = box.getSize(new THREE.Vector3());
+                        const center = box.getCenter(new THREE.Vector3());
+
+                        // Adjust the camera position and controls
+                        const maxDim = Math.max(size.x, size.y, size.z);
+                        const fov = camera.fov * (Math.PI / 180);
+                        let cameraZ = maxDim / (2 * Math.tan(fov / 2));
+
+                        // Adjusted multiplier to bring the camera closer
+                        camera.position.set(center.x, center.y, cameraZ * 0.95);
+
+                        // New: Adjust camera orientation to align with first input image
+                        // Assuming we have camera parameters in item.camera1
+                        if (item.camera1) {
+                            camera.position.copy(item.camera1.position);
+                            camera.rotation.copy(item.camera1.rotation);
+                            controls.target.copy(center);
+                        } else {
+                            // If no camera parameters, look at center
+                            camera.lookAt(center);
+                            controls.target.copy(center);
+                        }
+
+                        // Update camera's near and far clipping planes
+                        camera.near = maxDim / 100;
+                        camera.far = maxDim * 100;
+                        camera.updateProjectionMatrix();
+
+                        controls.update();
+                    },
+                    undefined,
+                    error => {
+                        console.error(`Error loading model for item ${item.id}:`, error);
+                    }
+                );
+
+                function animate() {
+                    requestAnimationFrame(animate);
+                    controls.update();
+                    renderer.render(scene, camera);
+                }
+                animate();
+            }
+
+            itemsPerPageInput.addEventListener('change', () => {
+                itemsPerPage = parseInt(itemsPerPageInput.value, 10);
+                currentPage = 1;
+                loadResults();
+            });
+
+            applyFilterButton.addEventListener('click', () => {
+                // Get filter values for each score
+                const filters = [];
+                scoreNamesSet.forEach(name => {
+                    const minInput = document.getElementById(`min-${name}`);
+                    const maxInput = document.getElementById(`max-${name}`);
+                    const minVal = parseInt(minInput.value, 10);
+                    const maxVal = parseInt(maxInput.value, 10);
+                    filters.push({ name: name, min: minVal, max: maxVal });
+                });
+
+                // Apply filters (Intersection of ranges)
+                filteredData = mockData.filter(item => {
+                    // Check if item falls within all of the specified percentile ranges
+                    for (const filter of filters) {
+                        const percentileKey = `${filter.name}_percentile`;
+                        const itemPercentile = item.scores[percentileKey];
+                        // Handle cases where the percentile might be undefined
+                        if (itemPercentile === undefined || itemPercentile < filter.min || itemPercentile > filter.max) {
+                            return false; // Exclude item if it doesn't match any range
+                        }
+                    }
+                    return true; // Include item if it matches all ranges
+                });
+
+                currentPage = 1;
+                loadResults();
+            });
+
+            prevPageButton.addEventListener('click', () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    loadResults();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            });
+
+            nextPageButton.addEventListener('click', () => {
+                const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    loadResults();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            });
+
+            // Sorting functionality
+            applySortingButton.addEventListener('click', () => {
+                const sortScore = sortScoreSelect.value;
+                const sortOrder = sortOrderSelect.value;
+
+                if (sortScore === 'userRating') {
+                    // Custom sorting for user ratings
+                    filteredData.sort((a, b) => {
+                        const ratingA = a.userRating !== undefined ? a.userRating : null;
+                        const ratingB = b.userRating !== undefined ? b.userRating : null;
+
+                        if (ratingA === null && ratingB === null) return 0;
+                        if (ratingA === null) return 1; // Unrated items go to the end
+                        if (ratingB === null) return -1;
+
+                        if (sortOrder === 'asc') {
+                            return ratingA - ratingB;
+                        } else {
+                            return ratingB - ratingA;
+                        }
+                    });
+                } else {
+                    filteredData.sort((a, b) => {
+                        const rankKey = sortOrder === 'asc' ? `${sortScore}_asc_rank` : `${sortScore}_desc_rank`;
+                        const rankA = a.scores[rankKey];
+                        const rankB = b.scores[rankKey];
+                        return rankA - rankB;
+                    });
+                }
+                currentPage = 1;
+                loadResults();
+            });
+
+            // Initial load
+            loadResults();
+        }
+
+        // Ensure the init function runs after the DOM is fully loaded
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+
+</body>
+</html>

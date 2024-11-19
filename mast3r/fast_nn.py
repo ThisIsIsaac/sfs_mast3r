@@ -61,7 +61,7 @@ def bruteforce_reciprocal_nns(A, B, device='cuda', block_size=None, dist='l2'):
                 line_mask = min_B_j < dis_B[j * block_size:(j + 1) * block_size]
 
                 dis_A[i * block_size:(i + 1) * block_size][col_mask] = min_A_i[col_mask]
-                dis_B[j * block_size:(j + 1) * block_size][line_mask] = min_B_j[line_mask]
+                dis_B[j * block_size:(j + 1) * block_size][line_mask] = min_B_j[line_mask];
 
                 nn_A[i * block_size:(i + 1) * block_size][col_mask] = argmin_A_i[col_mask] + (j * block_size)
                 nn_B[j * block_size:(j + 1) * block_size][line_mask] = argmin_B_j[line_mask] + (i * block_size)
@@ -106,7 +106,7 @@ def merge_corres(idx1, idx2, shape1=None, shape2=None, ret_xy=True, ret_index=Fa
     return xy1, xy2
 
 
-def fast_reciprocal_NNs(pts1, pts2, subsample_or_initxy1=8, ret_xy=True, pixel_tol=0, ret_basin=False,
+def fast_reciprocal_NNs(pts1, pts2, subsample_or_initxy1=8, ret_xy=True, pixel_tol=0, ret_basin=False, ret_dists=False,
                         device='cuda', **matcher_kw):
     H1, W1, DIM1 = pts1.shape
     H2, W2, DIM2 = pts2.shape
@@ -131,6 +131,9 @@ def fast_reciprocal_NNs(pts1, pts2, subsample_or_initxy1=8, ret_xy=True, pixel_t
     xy2 = np.full_like(xy1, -1)
     old_xy1 = xy1.copy()
     old_xy2 = xy2.copy()
+    
+    # dist1 = np.full_like(xy1, np.inf, dtype=np.float32)
+    # dist2 = np.full_like(xy1, np.inf, dtype=np.float32)
 
     if 'dist' in matcher_kw or 'block_size' in matcher_kw \
             or (isinstance(device, str) and device.startswith('cuda')) \
@@ -148,7 +151,6 @@ def fast_reciprocal_NNs(pts1, pts2, subsample_or_initxy1=8, ret_xy=True, pixel_t
     basin = np.full((H1 * W1 + 1,), -1, dtype=np.int32) if ret_basin else None
 
     niter = 0
-    # n_notyet = [len(notyet)]
     while notyet.any():
         _, xy2[notyet] = to_numpy(tree2.query(pts1[xy1[notyet]], **matcher_kw))
         if not ret_basin:
@@ -167,8 +169,6 @@ def fast_reciprocal_NNs(pts1, pts2, subsample_or_initxy1=8, ret_xy=True, pixel_t
         old_xy2[:] = xy2
         old_xy1[:] = xy1
 
-    # print('notyet_stats:', ' '.join(map(str, (n_notyet+[0]*10)[:max_iter])))
-
     if pixel_tol > 0:
         # in case we only want to match some specific points
         # and still have some way of checking reciprocity
@@ -182,10 +182,14 @@ def fast_reciprocal_NNs(pts1, pts2, subsample_or_initxy1=8, ret_xy=True, pixel_t
         converged = ~notyet  # converged correspondences
 
     # keep only unique correspondences, and sort on xy1
-    xy1, xy2 = merge_corres(xy1[converged], xy2[converged], (H1, W1), (H2, W2), ret_xy=ret_xy)
+    converged_xy1, converged_xy2, _ = merge_corres(xy1[converged], xy2[converged], (H1, W1), (H2, W2), ret_xy=ret_xy, ret_index=True)
     if ret_basin:
-        return xy1, xy2, basin
-    return xy1, xy2
+        return converged_xy1, converged_xy2, basin
+    # elif ret_dists:
+    #     mutual_dists = (dist1 + dist2) / 2
+    #     converged_dists = mutual_dists[converged_indices]
+    #     return converged_xy1, converged_xy2, converged_dists
+    return converged_xy1, converged_xy2
 
 
 def extract_correspondences_nonsym(A, B, confA, confB, subsample=8, device=None, ptmap_key='pred_desc', pixel_tol=0):

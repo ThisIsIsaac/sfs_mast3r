@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Image Viewer with CLIP Scores</title>
+    <!-- Adding necessary styles -->
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            padding-top: 160px; /* Adjusted padding to accommodate controls */
+        }
+        /* Adjust padding when filters are collapsed */
+        body.collapsed-filters {
+            padding-top: 60px; /* Height of the controls bar when collapsed */
+        }
+        #controls {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(255,255,255,0.95);
+            padding: 10px;
+            box-sizing: border-box;
+            z-index: 1000;
+            overflow: hidden; /* Hide overflow */
+        }
+        #filter-container {
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+            max-height: 500px; /* Set to accommodate expanded filters */
+        }
+        /* Collapsed state */
+        #filter-container.collapsed {
+            max-height: 0;
+        }
+        /* Styles for filter controls */
+        #filter-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr; /* Two columns */
+            grid-gap: 10px;
+            max-height: 300px; /* Adjust as needed */
+            overflow-y: auto; /* Enable vertical scrolling */
+        }
+        #filter-controls::-webkit-scrollbar {
+            width: 8px;
+        }
+        #filter-controls::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 4px;
+        }
+        #controls .filter-group {
+            display: flex;
+            align-items: center;
+        }
+        #controls .filter-group label {
+            margin-right: 5px;
+            font-weight: bold;
+        }
+        #controls .filter-group input {
+            margin-right: 5px;
+            width: 60px;
+        }
+        #controls label {
+            margin-right: 5px;
+        }
+        #controls input[type="number"] {
+            margin-right: 10px;
+            width: 60px;
+        }
+        #controls select {
+            margin-right: 10px;
+        }
+        #controls button {
+            margin-right: 10px;
+            margin-top: 10px;
+        }
+        #results-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-around;
+        }
+        .result-item {
+            width: calc(33% - 20px); /* Three items per row */
+            margin: 10px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            padding: 10px;
+            position: relative;
+        }
+        .image-container {
+            width: 100%;
+            max-height: 240px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        .image-container img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+        .clip-scores {
+            margin-top: 10px;
+        }
+        /* Adjusted styles for two-column layout */
+        .phrase-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .phrase-table td {
+            vertical-align: top;
+            border: none;
+            padding: 0;
+        }
+        .phrase-cell {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .phrase-cell input {
+            margin-right: 5px;
+        }
+        .selected-row {
+            background-color: rgba(144,238,144,0.5); /* Light green with low opacity */
+        }
+        #pagination {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 20px 0;
+        }
+        #pagination button {
+            margin: 0 5px;
+        }
+        #page-info {
+            margin: 0 10px;
+        }
+        .image-info {
+            display: none; /* Hide the image info section */
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <!-- Toggle Button -->
+        <button id="toggle-filters">Hide Filters</button>
+
+        <!-- Begin filter container -->
+        <div id="filter-container">
+            <label for="items-per-page">Items per page:</label>
+            <input type="number" id="items-per-page" min="1" max="1000" value="15">
+            <!-- Filter controls will be added dynamically -->
+            <div id="filter-controls"></div>
+            <button id="apply-filters">Apply Filters</button>
+            <!-- Sorting controls -->
+            <label for="sort-by">Sort by:</label>
+            <select id="sort-by">
+                <!-- Options will be populated dynamically -->
+            </select>
+            <label for="sort-order">Order:</label>
+            <select id="sort-order">
+                <option value="desc">Descending</option>
+                <option value="asc">Ascending</option>
+            </select>
+            <button id="apply-sorting">Sort</button>
+            <!-- Save and Load Buttons -->
+            <button id="save-selections">Save Selections</button>
+            <input type="file" id="load-selections-input" accept=".json" style="display: none;">
+            <button id="load-selections">Load Selections</button>
+        </div>
+        <!-- End filter container -->
+    </div>
+    <div id="results-container"></div>
+    <div id="pagination">
+        <button id="prev-page">&lt; Previous</button>
+        <span id="page-info"></span>
+        <button id="next-page">Next &gt;</button>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', init);
+
+        async function init() {
+            const dataFilePath = '/viscam/projects/sfs/mast3r/clip_scores/clip_scores_20241113_1610.json'; // Replace with your JSON data file path
+            let data = [];
+
+            try {
+                const response = await fetch(dataFilePath);
+                data = await response.json();
+
+                // Initialize selected_phrases field for each image
+                data.forEach(item => {
+                    if (!item.selected_phrases) {
+                        item.selected_phrases = [];
+                    }
+                    // Remove height and width properties
+                    delete item.width;
+                    delete item.height;
+                });
+
+            } catch (error) {
+                console.error('Error loading data:', error);
+            }
+
+            // Extract all unique phrases from the data
+            const phrasesSet = new Set();
+            data.forEach(item => {
+                Object.keys(item.clip_scores).forEach(phrase => {
+                    phrasesSet.add(phrase);
+                });
+            });
+            const allPhrases = Array.from(phrasesSet);
+
+            // Dynamically create filter controls for each phrase
+            const filterControlsDiv = document.getElementById('filter-controls');
+            allPhrases.forEach(phrase => {
+                const phraseFilterDiv = document.createElement('div');
+                phraseFilterDiv.className = 'filter-group';
+                phraseFilterDiv.innerHTML = `
+                    <label>${phrase}</label>
+                    Min: <input type="number" id="min-${phrase}" value="" step="0.01">
+                    Max: <input type="number" id="max-${phrase}" value="" step="0.01">
+                `;
+                filterControlsDiv.appendChild(phraseFilterDiv);
+            });
+
+            // Populate sort options
+            const sortBySelect = document.getElementById('sort-by');
+            allPhrases.forEach(optionValue => {
+                const option = document.createElement('option');
+                option.value = optionValue;
+                option.textContent = optionValue;
+                sortBySelect.appendChild(option);
+            });
+
+            // Get references to DOM elements
+            const itemsPerPageInput = document.getElementById('items-per-page');
+            const applyFiltersButton = document.getElementById('apply-filters');
+            const applySortingButton = document.getElementById('apply-sorting');
+            const prevPageButton = document.getElementById('prev-page');
+            const nextPageButton = document.getElementById('next-page');
+            const pageInfo = document.getElementById('page-info');
+            const resultsContainer = document.getElementById('results-container');
+            const sortOrderSelect = document.getElementById('sort-order');
+            const toggleFiltersButton = document.getElementById('toggle-filters');
+            const filterContainer = document.getElementById('filter-container');
+            const saveSelectionsButton = document.getElementById('save-selections');
+            const loadSelectionsButton = document.getElementById('load-selections');
+            const loadSelectionsInput = document.getElementById('load-selections-input');
+
+            let currentPage = 1;
+            let itemsPerPage = parseInt(itemsPerPageInput.value, 10);
+            let filteredData = [...data];
+
+            itemsPerPageInput.addEventListener('change', () => {
+                itemsPerPage = parseInt(itemsPerPageInput.value, 10);
+                currentPage = 1;
+                loadResults();
+            });
+
+            applyFiltersButton.addEventListener('click', () => {
+                applyFilters();
+            });
+
+            applySortingButton.addEventListener('click', () => {
+                applySorting();
+            });
+
+            prevPageButton.addEventListener('click', () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    loadResults();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            });
+
+            nextPageButton.addEventListener('click', () => {
+                const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    loadResults();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            });
+
+            toggleFiltersButton.addEventListener('click', () => {
+                filterContainer.classList.toggle('collapsed');
+                document.body.classList.toggle('collapsed-filters');
+
+                if (filterContainer.classList.contains('collapsed')) {
+                    toggleFiltersButton.textContent = 'Show Filters';
+                } else {
+                    toggleFiltersButton.textContent = 'Hide Filters';
+                }
+            });
+
+            saveSelectionsButton.addEventListener('click', () => {
+                saveSelections();
+            });
+
+            loadSelectionsButton.addEventListener('click', () => {
+                loadSelectionsInput.click();
+            });
+
+            loadSelectionsInput.addEventListener('change', () => {
+                const file = loadSelectionsInput.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        try {
+                            const loadedData = JSON.parse(e.target.result);
+                            data = loadedData;
+                            filteredData = [...data];
+                            currentPage = 1;
+                            loadResults();
+                        } catch (error) {
+                            console.error('Error parsing JSON:', error);
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            });
+
+            function applyFilters() {
+                filteredData = data.filter(item => {
+                    // For each phrase, check if the item's score meets the specified min and max thresholds
+                    for (const phrase of allPhrases) {
+                        const minInput = document.getElementById(`min-${phrase}`);
+                        const maxInput = document.getElementById(`max-${phrase}`);
+                        const minVal = parseFloat(minInput.value);
+                        const maxVal = parseFloat(maxInput.value);
+                        const score = item.clip_scores[phrase];
+
+                        if (!isNaN(minVal) && (score === undefined || score < minVal)) {
+                            return false;
+                        }
+
+                        if (!isNaN(maxVal) && (score === undefined || score > maxVal)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+                currentPage = 1;
+                loadResults();
+            }
+
+            function applySorting() {
+                const sortBy = sortBySelect.value;
+                const sortOrder = sortOrderSelect.value;
+
+                filteredData.sort((a, b) => {
+                    let valueA = a.clip_scores[sortBy] !== undefined ? a.clip_scores[sortBy] : -Infinity;
+                    let valueB = b.clip_scores[sortBy] !== undefined ? b.clip_scores[sortBy] : -Infinity;
+                    return sortOrder === 'asc' ? valueA - valueB : valueB - valueA;
+                });
+                currentPage = 1;
+                loadResults();
+            }
+
+            function loadResults() {
+                resultsContainer.innerHTML = '';
+                const startIndex = (currentPage - 1) * itemsPerPage;
+                const endIndex = startIndex + itemsPerPage;
+                const pageData = filteredData.slice(startIndex, endIndex);
+
+                pageData.forEach(item => {
+                    const resultItem = createResultItem(item);
+                    resultsContainer.appendChild(resultItem);
+                });
+
+                updatePagination();
+            }
+
+            function createResultItem(item) {
+                const div = document.createElement('div');
+                div.className = 'result-item';
+
+                // Image container
+                const imageContainer = document.createElement('div');
+                imageContainer.className = 'image-container';
+
+                const img = document.createElement('img');
+                img.src = item.image_path;
+                img.alt = 'Image';
+
+                imageContainer.appendChild(img);
+
+                // CLIP Scores table
+                const clipScoresDiv = document.createElement('div');
+                clipScoresDiv.className = 'clip-scores';
+
+                const table = document.createElement('table');
+                table.className = 'phrase-table';
+                const tbody = document.createElement('tbody');
+
+                // Sort the clip scores from highest to lowest
+                const sortedScores = Object.entries(item.clip_scores).sort((a, b) => b[1] - a[1]);
+
+                // Loop through phrases and create table rows with two columns
+                for (let i = 0; i < sortedScores.length; i += 2) {
+                    const row = document.createElement('tr');
+
+                    // First Cell
+                    const cell1 = document.createElement('td');
+                    const [phrase1, score1] = sortedScores[i];
+                    const phraseCell1 = createPhraseCell(item, phrase1, score1);
+                    cell1.appendChild(phraseCell1);
+
+                    // Second Cell
+                    const cell2 = document.createElement('td');
+                    if (i + 1 < sortedScores.length) {
+                        const [phrase2, score2] = sortedScores[i + 1];
+                        const phraseCell2 = createPhraseCell(item, phrase2, score2);
+                        cell2.appendChild(phraseCell2);
+                    }
+                    row.appendChild(cell1);
+                    row.appendChild(cell2);
+                    tbody.appendChild(row);
+                }
+
+                table.appendChild(tbody);
+                clipScoresDiv.appendChild(table);
+
+                div.appendChild(imageContainer);
+                div.appendChild(clipScoresDiv);
+
+                return div;
+            }
+
+            function createPhraseCell(item, phrase, score) {
+                const container = document.createElement('div');
+                container.className = 'phrase-cell';
+
+                // Checkbox
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = item.selected_phrases.includes(phrase);
+
+                // Handle checkbox change event
+                checkbox.addEventListener('change', () => {
+                    handlePhraseSelection(item, phrase, checkbox.checked);
+                    if (checkbox.checked) {
+                        container.classList.add('selected-row');
+                    } else {
+                        container.classList.remove('selected-row');
+                    }
+                });
+
+                // Phrase text
+                const phraseSpan = document.createElement('span');
+                phraseSpan.textContent = `${phrase}: ${score.toFixed(3)}`;
+
+                container.appendChild(checkbox);
+                container.appendChild(phraseSpan);
+
+                // Initial row highlight based on selection
+                if (checkbox.checked) {
+                    container.classList.add('selected-row');
+                }
+
+                return container;
+            }
+
+            function handlePhraseSelection(item, phrase, isSelected) {
+                if (isSelected) {
+                    if (!item.selected_phrases.includes(phrase)) {
+                        item.selected_phrases.push(phrase);
+                    }
+                } else {
+                    const index = item.selected_phrases.indexOf(phrase);
+                    if (index > -1) {
+                        item.selected_phrases.splice(index, 1);
+                    }
+                }
+            }
+
+            function saveSelections() {
+                // Save the data array with updated selected_phrases
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
+                const downloadAnchorNode = document.createElement('a');
+                downloadAnchorNode.setAttribute("href", dataStr);
+                downloadAnchorNode.setAttribute("download", "data_with_selections.json");
+                document.body.appendChild(downloadAnchorNode); // Required for Firefox
+                downloadAnchorNode.click();
+                downloadAnchorNode.remove();
+            }
+
+            function updatePagination() {
+                const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+                pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+                prevPageButton.disabled = currentPage === 1;
+                nextPageButton.disabled = currentPage === totalPages || totalPages === 0;
+            }
+
+            // Initial load
+            loadResults();
+        }
+    </script>
+</body>
+</html>

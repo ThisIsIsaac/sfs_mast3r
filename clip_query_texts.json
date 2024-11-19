@@ -1,0 +1,443 @@
+{
+    "Bicycle": [
+      "A red bicycle",
+      "A white bicycle",
+      "A black bicycle",
+      "A blue bicycle",
+      "A red mountain bike",
+      "A black mountain bike",
+      "A vintage bike with basket",
+      "A BMX bike",
+      "A yellow road bike",
+      "A blue children's bike",
+      "A red children's bike",
+      "A unicycle"
+    ],
+    "Car": [
+      "A redcar",
+      "A white car",
+      "A black car",
+      "A blue car",
+
+      "A red sports car",
+      "A white sports car",
+      "A black sports car",
+      "A blue sports car",
+
+      "A red SUV",
+      "A white SUV",
+      "A black SUV",
+      "A blue SUV",
+
+      "A red sedan",
+      "A white sedan",
+      "A black sedan",
+      "A blue sedan",
+
+
+
+      "A classic Volkswagen Beetle",
+      "A yellow taxi cab",
+      "A black luxury sedan",
+      "A pickup truck",
+      "A police car with lights",
+      "A green vintage muscle car",
+      "A minivan"
+    ],
+    "Motorcycle": [
+      "A black Harley-Davidson",
+      "A red sport motorcycle",
+      "A vintage Vespa scooter",
+      "A dirt bike",
+      "A police motorcycle",
+      "A red motorcycle",
+      "A white motorcycle",
+      "A black motorcycle",
+      "A blue motorcycle"
+    ],
+    "Airplane": [
+      "A Boeing airplane",
+      "A Boeing airplane",
+      "A white Boeing airplane",
+      "A blue Boeing airplane",
+      "A commercial jet airplane",
+      "A small propeller plane",
+      "A cargo airplane",
+      "A fighter jet",
+      "A seaplane on water",
+      "A bomber plane"
+    ],
+    "Bus": [      
+      "A red bus",
+      "A white bus",
+      "A black bus",
+      "A blue bus",
+
+      "A yellow school bus",
+      "A red double-decker bus",
+      "A city transit bus",
+      "A tour bus",
+      "An electric bus",
+      "A vintage camper van",
+      "A white shuttle bus",
+      "A coach bus on highway"
+      
+    ],
+    "Train": [
+      "A steam locomotive",
+      "A high-speed bullet train",
+      "A freight train",
+      "A red commuter train",
+      "An old city tram",
+      "A subway train",
+      "A mountain train",
+      "An electric train",
+      "A passenger train",
+      "A heritage train"
+    ],
+    "Truck": [
+      "A red semi-truck",
+      "A yellow dump truck",
+      "A white delivery van",
+      "A pickup truck with big tires",
+      "A fire truck with ladder",
+      "A garbage truck",
+      "A food truck",
+      "A cement mixer truck",
+      "A tow truck",
+      "A military truck"
+    ],
+    "Boat": [
+      "A white sailboat",
+      "A red kayak",
+      "A luxury yacht",
+      "A fishing boat",
+      "A cruise ship",
+      "A speedboat",
+      "A wooden rowboat",
+      "A cargo ship",
+      "A gondola in Venice",
+      "A tugboat"
+    ],
+    "Traffic Light": [
+      "A red traffic light",
+      "A green traffic signal",
+      "A yellow traffic light",
+      "A traffic light with pedestrian signals",
+      "Traffic lights at night",
+      "An old-style traffic signal",
+      "A blinking traffic light",
+      "A traffic light on a pole",
+      "A rural traffic signal",
+      "Traffic lights over a road"
+    ],
+    "Fire Hydrant": [
+      "A red fire hydrant",
+      "A yellow fire hydrant",
+      "A green fire hydrant",
+      "A blue fire hydrant"
+    ],
+    "Stop Sign": [
+      "A red stop sign",
+      "A  yellow traffic sign"
+
+    ],
+    "Parking Meter": [
+      "Parking meters on street"
+    ],
+    "Bench": [
+      "A wooden park bench",
+      "A metal bench",
+      "A stone bench",
+      "A bench with snow",
+      "A colorful bench",
+      "A bench at bus stop"
+    ],
+    "Bird": [
+      "A red bird on branch",
+      "A blue bird in flight",
+      "A peacock",
+      "A crow",
+      "A hummingbird",
+      "A pigeon",
+      "An eagle with wings spread",
+      "A penguin",
+      "A flamingo standing",
+      "A colorful parrot"
+    ],
+    "Cat": [
+      "A black cat sitting",
+      "A black cat walking",
+      "A black cat standing",
+
+      "A white cat sitting",
+      "A white cat walking",
+      "A white cat standing",
+
+      "An orange cat sitting",
+      "An orange cat walking",
+      "An orange cat standing",
+
+      "An orange tabby cat",
+      "A Siamese cat",
+      "A white Persian cat",
+      "A kitten",
+      "A hairless sphynx cat"
+    ],
+    "Dog": [
+      "A golden retriever sitting",
+      "A golden retriever standing",
+      "A golden retriever walking",
+
+      "A white Labrador sitting",
+      "A white Labrador standing",
+      "A white Labrador walking",
+
+
+      "A German shepherd sitting",
+      "A German shepherd standing",
+      "A German shepherd walking",
+
+
+      "A small Chihuahua sitting",
+      "A small Chihuahua standing",
+      "A small Chihuahua walking",
+
+      "A husky dog",
+      "A poodle",
+      "A Dalmatian with spots",
+      "A bulldog",
+      "A beagle",
+      "A puppy with collar"
+    ],
+    "Horse": [
+      "A brown horse standing",
+      "A white horse standing",
+      "A black horse standing",
+
+      "A brown horse walking",
+      "A white horse walking",
+      "A black horse walking",
+      "A horse in a stable"
+    ],
+    "Sheep": [
+      "A white sheep sitting",
+      "A white sheep standing",
+      "A white sheep sleeping",
+      "Sheep on a hill",
+      "A black sheep"
+    ],
+    "Cow": [
+      "A black and white cow",
+      "A brown cow",
+      "A cow with a bell",
+      "Cows near a barn",
+      "A cow lying down",
+      "Cows at water trough",
+      "A calf with cow",
+      "A cow being milked",
+      "Cows on a path",
+      "A cow with horns"
+    ],
+    "Elephant": [
+      "An elephant",
+      "An elephant standing",
+      "An elephant lying down",
+      "A baby elephant",
+      "A herd of elephants"
+
+    ],
+    "Bear": [
+      "A grizzly bear walking",
+      "A polar bear walking",
+      "A black bear",
+      "A panda bear sitting",
+      "A panda bear walking",
+      "A brown bear"
+    ],
+    "Zebra": [
+      "A zebra",
+      "A zebra walking"
+    ],
+    "Giraffe": [
+      "A giraffe reaching for leaves",
+      "A giraffe standing"
+    ],
+    "Backpack": [
+      "A black hiker's backpack",
+      "A red student's backpack",
+      "A black student's backpack",
+      "A black leather backpack",
+      "A black laptop backpack",
+      "A black traveling luggage",
+      "A white traveling luggage"
+    ],
+    "Umbrella": [
+      "A red folded umbrella",
+      "A red opened umbrella",
+
+      "A black folded umbrella",
+      "A black opened umbrella",
+
+      "A white folded umbrella",
+      "A white opened umbrella",
+
+      "A clear transparent folded umbrella",
+      "A clear transparent opened umbrella",
+
+      "A rainbow umbrella"
+
+    ],
+    "Handbag": [
+      "A handbag with gold chain",
+      "A black leather handbag",
+      "A straw handbag",
+      "A red clutch purse",
+      "A tote bag with prints",
+      "A crossbody bag",
+      "A handbag with fringe",
+      "A vintage handbag",
+      "A recycled material handbag",
+      "A handbag with animal print"
+    ],
+    "Tie": [
+      "A striped tie",
+      "A blue tie",
+      "A red tie",
+      "A black tie",
+      "A blue bow tie",
+      "A red bow tie",
+      "A black bow tie"
+    ],
+    "Suitcase": [
+      "A suitcase",
+      "A metal suitcase",
+      "A vintage suitcase",
+      "A leather suitcase"
+    ],
+    "Frisbee": [
+      "A frisbee",
+      "A red frisbee",
+      "A yellow frisbee",
+      "A white frisbee"
+    ],
+    "Skis": [
+      "A pair of skis",
+      "A pair of blue skis",
+      "A pair of yellow skis",
+      "A pair of red skis"
+    ],
+    "Snowboard": [
+      "A snowboard",
+      "A blue snowboard",
+      "A red snowboard",
+      "A yellow snowboard",
+      "A black snowboard"
+    ],
+    "Sports Ball": [
+      "A soccer ball",
+      "A basketball",
+      "A baseball",
+      "A tennis ball",
+      "An American football",
+      "A volleyball",
+      "A white golf ball"
+    ],
+    "Kite": [
+      "A colorful kite in sky",
+      "A red kite in sky",
+      "A white kite in sky",
+      "A yellow kite in sky"
+    ],
+    "Baseball Bat": [
+      "A wooden baseball bat",
+      "A metal baseball bat",
+      "A bat and glove",
+      "A child's baseball bat"
+    ],
+    "Baseball Glove": [
+      "A baseball glove",
+      "A leather baseball glove"
+    ],
+    "Skateboard": [
+      "A Skateboard",
+      "A white Skateboard",
+      "A blue Skateboard",
+      "A black Skateboard",
+      "A red Skateboard"
+    ],
+    "Surfboard": [
+      "A surfboard",
+      "A white surfboard",
+      "A blue surfboard",
+      "A black surfboard",
+      "A red surfboard"
+    ],
+    "Tennis Racket": [
+      "A tennis racket",
+      "A white tennis racket",
+      "A black tennis racket",
+      "A yellow tennis racket",
+      "A blue tennis racket"
+    ],
+    "Bottle": [
+      "A glass water bottle",
+      "A green wine bottle",
+      "A plastic soda bottle",
+      "A milk bottle",
+      "A perfume bottle",
+      "A baby bottle",
+      "A ketchup bottle"
+    ],
+    "Wine Glass": [
+      "A wine glass with red wine",
+      "An empty wine glass",
+      "A wine glass with white wine"
+    ],
+    "Cup": [
+      "A coffee cup",
+      "A paper cup"
+    ],
+    "Fork": [
+      "A silver fork",
+      "A plastic fork"
+    ],
+    "Knife": [
+      "A chef's knife",
+      "A steak knife",
+      "A pocket knife"
+    ],
+    "Spoon": [
+      "A tea spoon",
+      "A wooden spoon",
+      "A silver spoon"
+    ],
+    "Bowl": [
+      "A small white bowl",
+      "A big white bowl",
+      "A wooden bowl"
+    ],
+    "Banana": [
+      "A yellow banana",
+      "A green banana",
+      "A bunch of bananas",
+      "A peeled banana"
+
+    ],
+    "Apple": [
+      "A red apple",
+      "A green apple",
+      "A slice of a red apple"
+    ],
+    "Sandwich": [
+      "A club sandwich",
+      "A sandwich",
+      "A peanut butter and jelly sandwich",
+      "A BLT sandwich"
+    ],
+    "Orange": [
+      "A whole orange",
+      "An Orange slice"
+
+    ]
+  }

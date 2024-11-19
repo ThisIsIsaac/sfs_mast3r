@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Image Viewer with CLIP Scores</title>
+    <!-- Adding necessary styles -->
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            padding-top: 150px; /* Prevent overlap with fixed controls */
+        }
+        #controls {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(255,255,255,0.95);
+            padding: 10px;
+            box-sizing: border-box;
+            z-index: 1000;
+            overflow-x: auto;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        #controls .filter-group {
+            margin-right: 15px;
+            display: flex;
+            align-items: center;
+        }
+        #controls .filter-group label {
+            margin-right: 5px;
+            font-weight: bold;
+        }
+        #controls .filter-group input {
+            margin-right: 5px;
+            width: 60px;
+        }
+        #controls label {
+            margin-right: 5px;
+        }
+        #controls input[type="number"] {
+            margin-right: 10px;
+            width: 60px;
+        }
+        #controls select {
+            margin-right: 10px;
+        }
+        #controls button {
+            margin-right: 10px;
+        }
+        #results-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-around;
+        }
+        .result-item {
+            width: calc(33% - 20px); /* Three items per row */
+            margin: 10px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            padding: 10px;
+        }
+        .image-container {
+            width: 100%;
+            max-height: 240px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .image-container img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+        .image-info, .clip-scores {
+            margin-top: 10px;
+        }
+        .clip-scores table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .clip-scores th, .clip-scores td {
+            border: 1px solid #ccc;
+            padding: 5px;
+            text-align: left;
+            font-size: 12px;
+        }
+        #pagination {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 20px 0;
+        }
+        #pagination button {
+            margin: 0 5px;
+        }
+        #page-info {
+            margin: 0 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <label for="items-per-page">Items per page:</label>
+        <input type="number" id="items-per-page" min="1" max="1000" value="15">
+        <!-- Filter controls will be added dynamically -->
+        <div id="filter-controls"></div>
+        <button id="apply-filters">Apply Filters</button>
+        <!-- Sorting controls -->
+        <label for="sort-by">Sort by:</label>
+        <select id="sort-by">
+            <!-- Options will be populated dynamically -->
+        </select>
+        <label for="sort-order">Order:</label>
+        <select id="sort-order">
+            <option value="desc">Descending</option>
+            <option value="asc">Ascending</option>
+        </select>
+        <button id="apply-sorting">Sort</button>
+    </div>
+    <div id="results-container"></div>
+    <div id="pagination">
+        <button id="prev-page">&lt; Previous</button>
+        <span id="page-info"></span>
+        <button id="next-page">Next &gt;</button>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', init);
+
+        async function init() {
+            const dataFilePath = 'data.json'; // Replace with your JSON data file path
+            let data = [];
+
+            try {
+                const response = await fetch(dataFilePath);
+                data = await response.json();
+            } catch (error) {
+                console.error('Error loading data:', error);
+            }
+
+            // Extract all unique phrases from the data
+            const phrasesSet = new Set();
+            data.forEach(item => {
+                Object.keys(item.clip_scores).forEach(phrase => {
+                    phrasesSet.add(phrase);
+                });
+            });
+            const allPhrases = Array.from(phrasesSet);
+
+            // Dynamically create filter controls for width and height
+            const filterControlsDiv = document.getElementById('filter-controls');
+
+            // Width filter controls
+            const widthFilterDiv = document.createElement('div');
+            widthFilterDiv.className = 'filter-group';
+            widthFilterDiv.innerHTML = `
+                <label>Width</label>
+                Min: <input type="number" id="min-width" value="" step="1">
+                Max: <input type="number" id="max-width" value="" step="1">
+            `;
+            filterControlsDiv.appendChild(widthFilterDiv);
+
+            // Height filter controls
+            const heightFilterDiv = document.createElement('div');
+            heightFilterDiv.className = 'filter-group';
+            heightFilterDiv.innerHTML = `
+                <label>Height</label>
+                Min: <input type="number" id="min-height" value="" step="1">
+                Max: <input type="number" id="max-height" value="" step="1">
+            `;
+            filterControlsDiv.appendChild(heightFilterDiv);
+
+            // Dynamically create filter controls for each phrase
+            allPhrases.forEach(phrase => {
+                const filterDiv = document.createElement('div');
+                filterDiv.className = 'filter-group';
+                filterDiv.innerHTML = `
+                    <label>${phrase}</label>
+                    Min: <input type="number" id="min-${phrase}" value="" step="0.01">
+                    Max: <input type="number" id="max-${phrase}" value="" step="0.01">
+                `;
+                filterControlsDiv.appendChild(filterDiv);
+            });
+
+            // Populate the sort options with phrases, width, and height
+            const sortBySelect = document.getElementById('sort-by');
+
+            // Add width and height to sort options
+            ['width', 'height', ...allPhrases].forEach(optionValue => {
+                const option = document.createElement('option');
+                option.value = optionValue;
+                option.textContent = optionValue.charAt(0).toUpperCase() + optionValue.slice(1);
+                sortBySelect.appendChild(option);
+            });
+
+            // Get references to DOM elements
+            const resultsContainer = document.getElementById('results-container');
+            const itemsPerPageInput = document.getElementById('items-per-page');
+            const applyFiltersButton = document.getElementById('apply-filters');
+            const applySortingButton = document.getElementById('apply-sorting');
+            const prevPageButton = document.getElementById('prev-page');
+            const nextPageButton = document.getElementById('next-page');
+            const pageInfo = document.getElementById('page-info');
+            const sortOrderSelect = document.getElementById('sort-order');
+
+            let currentPage = 1;
+            let itemsPerPage = parseInt(itemsPerPageInput.value, 10);
+            let filteredData = [...data];
+
+            itemsPerPageInput.addEventListener('change', () => {
+                itemsPerPage = parseInt(itemsPerPageInput.value, 10);
+                currentPage = 1;
+                loadResults();
+            });
+
+            applyFiltersButton.addEventListener('click', () => {
+                applyFilters();
+            });
+
+            applySortingButton.addEventListener('click', () => {
+                applySorting();
+            });
+
+            prevPageButton.addEventListener('click', () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    loadResults();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            });
+
+            nextPageButton.addEventListener('click', () => {
+                const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    loadResults();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            });
+
+            function applyFilters() {
+                filteredData = data.filter(item => {
+                    // Width filtering
+                    const minWidth = parseInt(document.getElementById('min-width').value, 10);
+                    const maxWidth = parseInt(document.getElementById('max-width').value, 10);
+                    const itemWidth = item.width;
+
+                    if (!isNaN(minWidth) && itemWidth < minWidth) {
+                        return false;
+                    }
+
+                    if (!isNaN(maxWidth) && itemWidth > maxWidth) {
+                        return false;
+                    }
+
+                    // Height filtering
+                    const minHeight = parseInt(document.getElementById('min-height').value, 10);
+                    const maxHeight = parseInt(document.getElementById('max-height').value, 10);
+                    const itemHeight = item.height;
+
+                    if (!isNaN(minHeight) && itemHeight < minHeight) {
+                        return false;
+                    }
+
+                    if (!isNaN(maxHeight) && itemHeight > maxHeight) {
+                        return false;
+                    }
+
+                    // For each phrase, check if the item's score meets the specified min and max thresholds
+                    for (const phrase of allPhrases) {
+                        const minInput = document.getElementById(`min-${phrase}`);
+                        const maxInput = document.getElementById(`max-${phrase}`);
+                        const minVal = parseFloat(minInput.value);
+                        const maxVal = parseFloat(maxInput.value);
+                        const score = item.clip_scores[phrase];
+
+                        if (!isNaN(minVal) && (score === undefined || score < minVal)) {
+                            return false;
+                        }
+
+                        if (!isNaN(maxVal) && (score === undefined || score > maxVal)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+                currentPage = 1;
+                loadResults();
+            }
+
+            function applySorting() {
+                const sortBy = sortBySelect.value;
+                const sortOrder = sortOrderSelect.value;
+
+                filteredData.sort((a, b) => {
+                    let valueA, valueB;
+                    if (sortBy === 'width' || sortBy === 'height') {
+                        valueA = a[sortBy];
+                        valueB = b[sortBy];
+                    } else {
+                        valueA = a.clip_scores[sortBy] !== undefined ? a.clip_scores[sortBy] : -Infinity;
+                        valueB = b.clip_scores[sortBy] !== undefined ? b.clip_scores[sortBy] : -Infinity;
+                    }
+                    return sortOrder === 'asc' ? valueA - valueB : valueB - valueA;
+                });
+                currentPage = 1;
+                loadResults();
+            }
+
+            function loadResults() {
+                resultsContainer.innerHTML = '';
+                const startIndex = (currentPage - 1) * itemsPerPage;
+                const endIndex = startIndex + itemsPerPage;
+                const pageData = filteredData.slice(startIndex, endIndex);
+
+                pageData.forEach(item => {
+                    const resultItem = createResultItem(item);
+                    resultsContainer.appendChild(resultItem);
+                });
+
+                updatePagination();
+            }
+
+            function createResultItem(item) {
+                const div = document.createElement('div');
+                div.className = 'result-item';
+
+                // Image container
+                const imageContainer = document.createElement('div');
+                imageContainer.className = 'image-container';
+
+                const img = document.createElement('img');
+                img.src = item.image_path;
+                img.alt = 'Image';
+
+                imageContainer.appendChild(img);
+
+                // Image info (width and height)
+                const imageInfoDiv = document.createElement('div');
+                imageInfoDiv.className = 'image-info';
+                imageInfoDiv.textContent = `Width: ${item.width}px, Height: ${item.height}px`;
+
+                // CLIP Scores table
+                const clipScoresDiv = document.createElement('div');
+                clipScoresDiv.className = 'clip-scores';
+                const table = document.createElement('table');
+                const thead = document.createElement('thead');
+                const headerRow = document.createElement('tr');
+                const thPhrase = document.createElement('th');
+                thPhrase.textContent = 'Phrase';
+                const thScore = document.createElement('th');
+                thScore.textContent = 'Score';
+                headerRow.appendChild(thPhrase);
+                headerRow.appendChild(thScore);
+                thead.appendChild(headerRow);
+                table.appendChild(thead);
+
+                const tbody = document.createElement('tbody');
+
+                // Sort the clip scores from highest to lowest
+                const sortedScores = Object.entries(item.clip_scores).sort((a, b) => b[1] - a[1]);
+
+                for (const [phrase, score] of sortedScores) {
+                    const row = document.createElement('tr');
+                    const tdPhrase = document.createElement('td');
+                    tdPhrase.textContent = phrase;
+                    const tdScore = document.createElement('td');
+                    tdScore.textContent = score.toFixed(3);
+                    row.appendChild(tdPhrase);
+                    row.appendChild(tdScore);
+                    tbody.appendChild(row);
+                }
+                table.appendChild(tbody);
+
+                clipScoresDiv.appendChild(table);
+
+                div.appendChild(imageContainer);
+                div.appendChild(imageInfoDiv);
+                div.appendChild(clipScoresDiv);
+
+                return div;
+            }
+
+            function updatePagination() {
+                const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+                pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+                prevPageButton.disabled = currentPage === 1;
+                nextPageButton.disabled = currentPage === totalPages || totalPages === 0;
+            }
+
+            // Initial load
+            loadResults();
+        }
+    </script>
+</body>
+</html> 

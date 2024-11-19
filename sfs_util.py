@@ -9,79 +9,37 @@ import inspect
 import importlib
 importlib.reload(mast3r)
 """
+
 import os
 import sys
 import mast3r.utils.path_to_dust3r
 sys.path.append('/viscam/u/iamisaac/mast3r/dust3r/croco')
-from mast3r.model import AsymmetricMASt3R
-from mast3r.fast_nn import fast_reciprocal_NNs
-import mast3r.demo as demo
-import wandb
-from dust3r.inference import inference
-from dust3r.utils.image import load_images
+
 # visualize a few matches
-import numpy as np
 import torch
 from matplotlib import pyplot as plt
-import cv2
-import numpy as np
+
+
 import numpy as np
 import requests
 from PIL import Image
 import base64
 import io
-import pandas as pd
 import ast
 import copy
-import mast3r.demo
-from clip_retrieval.clip_back import download_image
-import time
-import imghdr
+from clip_retrieval.clip_back import download_image 
+
 from urllib.parse import urlparse
-from transformers import AutoImageProcessor, AutoModel
-import torch.nn.functional as F
+
 import json
 from datetime import datetime
 import shutil
+from pygltflib import GLTF2
+from scipy.spatial.transform import Rotation as Rscipy
+import hashlib
+from torchvision import transforms
 
-# start a new wandb run to track this script
-wandb.init(
-    # set the wandb project where this run will be logged
-    project="sfs",
-)
-
-def init_mast3r(device='cuda'):
-    model_name = "naver/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric"
-    model = AsymmetricMASt3R.from_pretrained(model_name).to(device)
-    return model
-
-def run_mast3r(model1, img1_path, img2_path, device='cuda'):
-    images = load_images([img1_path, img2_path], size=512)
-    output = inference([tuple(images)], model, device, batch_size=1, verbose=False)
-
-    # at this stage, you have the raw dust3r predictions
-    view1, pred1 = output['view1'], output['pred1']
-    view2, pred2 = output['view2'], output['pred2']
-
-    desc1, desc2 = pred1['desc'].squeeze(0).detach(), pred2['desc'].squeeze(0).detach()
-
-    # find 2D-2D matches between the two images
-    matches_im0, matches_im1 = fast_reciprocal_NNs(desc1, desc2, subsample_or_initxy1=8,
-                                                   device=device, dist='dot', block_size=2**13)
-
-    # ignore small border around the edge
-    H0, W0 = view1['true_shape'][0]
-    valid_matches_im0 = (matches_im0[:, 0] >= 3) & (matches_im0[:, 0] < int(W0) - 3) & (
-        matches_im0[:, 1] >= 3) & (matches_im0[:, 1] < int(H0) - 3)
-
-    H1, W1 = view2['true_shape'][0]
-    valid_matches_im1 = (matches_im1[:, 0] >= 3) & (matches_im1[:, 0] < int(W1) - 3) & (
-        matches_im1[:, 1] >= 3) & (matches_im1[:, 1] < int(H1) - 3)
-
-    valid_matches = valid_matches_im0 & valid_matches_im1
-    matches_im0, matches_im1 = matches_im0[valid_matches], matches_im1[valid_matches]
-    figure_img = viz_matches(output, matches_im0, matches_im1)
-    return (output, matches_im0, matches_im1, figure_img)
+MIN_IMG_SIZE = 64
 
 def viz_matches(mast3r_output, matches_im0, matches_im1, n_viz = 20):
     view1, view2 = mast3r_output['view1'], mast3r_output['view2']
@@ -159,6 +117,59 @@ def rotation_error(R_out, R_gt):
     return error
 
 
+def get_rotation_from_glb(glb_file_path):
+    gltf = GLTF2().load(glb_file_path)
+
+    # Extract camera nodes
+    nodes = gltf.nodes
+    camera_nodes = []
+    for idx, node in enumerate(nodes):
+        if node.camera is not None:
+            camera_nodes.append((idx, node))
+
+    if len(camera_nodes) < 2:
+        raise ValueError("Less than two camera nodes found in the GLB file.")
+
+    # Function to compute the transformation matrix of a node
+    def get_node_matrix(node):
+        matrix = np.eye(4)
+        if node.translation is not None:
+            T = np.eye(4)
+            T[:3, 3] = node.translation
+            matrix = matrix @ T
+        if node.rotation is not None:
+            R = Rscipy.from_quat([
+                node.rotation[0],  # x
+                node.rotation[1],  # y
+                node.rotation[2],  # z
+                node.rotation[3],  # w
+            ]).as_matrix()
+            R_matrix = np.eye(4)
+            R_matrix[:3, :3] = R
+            matrix = matrix @ R_matrix
+        if node.scale is not None:
+            S = np.diag([node.scale[0], node.scale[1], node.scale[2], 1])
+            matrix = matrix @ S
+        if node.matrix is not None and any(node.matrix):
+            matrix = np.array(node.matrix).reshape(4, 4)
+        return matrix
+
+    # Get transformation matrices of the first two camera nodes
+    idx1, node1 = camera_nodes[0]
+    idx2, node2 = camera_nodes[1]
+    matrix1 = get_node_matrix(node1)
+    matrix2 = get_node_matrix(node2)
+
+    # Compute rotation between the two cameras
+    R1 = matrix1[:3, :3]
+    R2 = matrix2[:3, :3]
+    R_rel = R2 @ R1.T
+    r_rel = Rscipy.from_matrix(R_rel)
+    angle_axis = r_rel.as_rotvec()
+    angle = np.linalg.norm(angle_axis)
+    axis = angle_axis / angle if angle != 0 else angle_axis
+    return angle
+
 def compute_camera_transformation(R1, T1, R2, T2):
     """
     Compute the transformation between two cameras given their rotations and translations.
@@ -234,22 +245,36 @@ def is_valid_image_url(url):
         if 'image' not in content_type:
             return False
 
-        # If content-type check passes, try to get a small part of the image
+        # If content-type check passes, try to get the image content incrementally
+        from PIL import ImageFile
+
         response = requests.get(url, stream=True, timeout=5)
-        content = next(response.iter_content(chunk_size=1024))
-        
-        # Use imghdr to check if the content is a valid image
-        image_type = imghdr.what(None, content)
-        return image_type is not None
+
+        parser = ImageFile.Parser()
+
+        # Read the data incrementally
+        try:
+            for chunk in response.iter_content(chunk_size=1024):
+                parser.feed(chunk)
+                if parser.image:
+                    width, height = parser.image.size
+                    # Check if image dimensions are large enough.
+                    return width > MIN_IMG_SIZE and height > MIN_IMG_SIZE
+            # If we reach here, the image size could not be determined
+            return False
+        except Exception:
+            # If an error occurs (e.g., invalid image), return False
+            return False
+
 
     except Exception as e:
         print(f"Error checking URL {url}: {str(e)}")
         return False
 
-def send_query(response_idxs, image_path=None, query_text=None, display_images=False, num_responses = 5, indice_name="co3d", image_cache_path=None, include_query_image=False):
+def send_query(existing_imgs, response_idxs=None, image_path=None, query_text=None, num_responses = 5, indice_name="co3d", image_cache_path=None, include_query_image=False):
     data = {
-        "num_images": num_responses,
-        "num_result_ids": num_responses,
+        "num_images": num_responses*10,
+        "num_result_ids": num_responses*10,
         "indice_name": indice_name,
         "modality":"image"
     }
@@ -262,37 +287,75 @@ def send_query(response_idxs, image_path=None, query_text=None, display_images=F
     response = requests.post("http://localhost:1234/knn-service", json=data)
     if response.status_code != 200:
         raise ValueError("Request failed!!")
-    results = parse_response(response, response_idxs=response_idxs, indice_name=indice_name, image_cache_path=image_cache_path, include_query_image=include_query_image, query_image_path=image_path)
+    results = parse_response(response, response_idxs=response_idxs, indice_name=indice_name, num_responses=num_responses, img_dir=image_cache_path, include_query_image=include_query_image, query_image_path=image_path, existing_imgs=existing_imgs)
     return results
 
-def parse_response(response, indice_name, response_idxs, image_cache_path=None, include_query_image=False, query_image_path=None):
+def url_to_filename(url):
+    """Hash the URL to create a unique filename."""
+    hash_object = hashlib.md5(url.encode('utf-8'))
+    filename_hash = hash_object.hexdigest()
+    return filename_hash
+
+def get_existing_images(directory):
+    """Create a set of existing image filenames in the directory."""
+    # List of common image file extensions
+    extensions = {'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp'}
+    existing_files = set()
+    for filename in os.listdir(directory):
+        if '.' in filename:
+            name, ext = filename.rsplit('.', 1)
+            if ext.lower() in extensions:
+                existing_files.add(filename)
+    return existing_files
+
+def image_exists(filename_hash, existing_files):
+    """Check if an image with the given hash already exists in the directory."""
+
+    # Check if any file with the filename_hash and any of the extensions exists
+    filename = f"{filename_hash}.jpg"
+    if filename in existing_files:
+        return True
+    return False
+
+def check_and_download_image(url, directory, existing_files):
+    """Download the image from the URL if it doesn't already exist."""
+    filename_hash = url_to_filename(url)
+    filename = f"{filename_hash}.jpg"
+    filepath = os.path.join(directory, filename)
+    if image_exists(filename_hash, existing_files):
+        image = Image.open(filepath)
+    else:
+        image_data = download_image(url)
+        if isinstance(image_data, io.BytesIO):
+            image = Image.open(image_data).resize((256, 256))
+        else:
+            image = Image.open(io.BytesIO(image_data)).resize((256, 256))
+        image.save(filepath)
+        existing_files.add(filename)
+    return filepath, np.array(image)
+
+def parse_response(response, indice_name, num_responses, existing_imgs, response_idxs=None, img_dir=None, include_query_image=False, query_image_path=None):
+    seen_urls = set()
     results = response.json()
-    results = [results[idx] for idx in response_idxs]
+    if response_idxs: results = [results[idx] for idx in response_idxs]
     parsed_results = []
-    if include_query_image:
+    if query_image_path and include_query_image:
         parsed_results.append({
             "image_path": query_image_path,
             "image": np.array(Image.open(query_image_path))
         })
     for result in results:
+        if result["url"] in seen_urls:
+            continue
+        seen_urls.add(result["url"])
         parsed_result = copy.deepcopy(result)
         if "image" in result:
             image = Image.open(io.BytesIO(base64.b64decode(result["image"])))
+            parsed_result["image"] = np.array(image)
         elif "url" in result:
-            # Generate a unique filename
-            filename = f"image_{result.get('id', hash(result['url']))}.jpg"
-            filepath = os.path.join(image_cache_path, filename)
-            
             if is_valid_image_url(result["url"]):
                 try:
-                    # Download and save the image
-                    image_data = download_image(result["url"])
-                    if isinstance(image_data, io.BytesIO):
-                        image = Image.open(image_data).resize((256, 256))
-                    else:
-                        image = Image.open(io.BytesIO(image_data)).resize((256, 256))
-                    image.save(filepath)
-                    parsed_result["image_path"] = filepath
+                    parsed_result["image_path"], parsed_result["image"] = check_and_download_image(result["url"], img_dir, existing_imgs)
                 except Exception as e:
                     print(f"Error downloading or saving image from url: {result['url']}")
                     print(f"Error details: {str(e)}")
@@ -301,7 +364,6 @@ def parse_response(response, indice_name, response_idxs, image_cache_path=None, 
                 print(f"Invalid or non-image URL: {result['url']}")
                 continue
 
-        parsed_result["image"] = np.array(image)
         if indice_name == "co3d":
             R = ast.literal_eval(result["R"])
             R = np.array(R).reshape(3, 3)
@@ -319,193 +381,82 @@ def parse_response(response, indice_name, response_idxs, image_cache_path=None, 
             parsed_result["T"] = T
             parsed_result["focal_length"] = focal_length
             parsed_result["principal_point"] = principal_point
+
         parsed_results.append(parsed_result)
+        if len(parsed_results) == num_responses:
+            break
     return parsed_results
 
-def run_reconstruction(model, filelist, min_conf_thr = 1.5, matching_conf_thr=2.0, shared_intrinsics=False, output_path="/viscam/projects/sfs/mast3r_outputs/test1"):
-    gradio_delete_cache = False
-    current_scene_state = None # gradio scene state
-    image_size = 512 #224
-    optim_level = "refine"
-    silent = True
-    device = 'cuda'
-    niter1 = 500
-    lr1 = 0.07
-    niter2 = 200
-    lr2 = 0.014
-    as_pointcloud = True
-    mask_sky = True
-    clean_depth = True
-    transparent_cams = True
-    cam_size = 0.2
-    scenegraph_type = "complete"
-    winsize = 1
-    win_cyclic = False
-    TSDF_thresh = 0
-    refid = 0 # Scene ID
-
-    args = {
-        "outdir":output_path,
-        "model":model,
-        "device":device,
-        "filelist":filelist,
-        "niter1":niter1,
-        "niter2":niter2,
-        "lr1":lr1,
-        "lr2":lr2,
-        "as_pointcloud":as_pointcloud,
-        "cam_size":cam_size,
-        "TSDF_thresh":TSDF_thresh,
-        "gradio_delete_cache":gradio_delete_cache,
-        "current_scene_state":current_scene_state,
-        "image_size":image_size,
-        "optim_level":optim_level,
-        "silent":silent,
-        "mask_sky":mask_sky,
-        "clean_depth":clean_depth,
-        "transparent_cams":transparent_cams,
-        "scenegraph_type":scenegraph_type,
-        "winsize":winsize,
-        "win_cyclic":win_cyclic,
-        "refid":refid,
-        "shared_intrinsics":shared_intrinsics,
-        "min_conf_thr":min_conf_thr,
-        "matching_conf_thr":matching_conf_thr,
-    }
-    sparse_ga_state, outfile = demo.get_reconstructed_scene(**args)
-    sparse_ga_state.sparse_ga.recon_file_path = outfile
-    return sparse_ga_state.sparse_ga
-
-def run_mast3r_from_clip_retrieval(model, output_path, image_path=None, query_text=None, num_responses=10, response_idxs=[0, 1], min_conf_thr = 1.5, matching_conf_thr=2.0, shared_intrinsics=False, display_images=False, indice_name="co3d", image_cache_path=None, include_query_image=False):
-    responses = send_query(image_path=image_path, query_text=query_text, display_images=display_images, num_responses=num_responses, response_idxs=response_idxs, indice_name=indice_name, image_cache_path=image_cache_path, include_query_image=include_query_image)
+def generate_paris(responses):
     img_paths = [response["image_path"] for response in responses]
-    images = [wandb.Image(response["image"]) for response in responses]
-    if len(images) < 2:
-        print(f"Not enough images to run reconstruction!")
-        return
-    sparse_ga = run_reconstruction(model, img_paths, min_conf_thr=min_conf_thr, matching_conf_thr=matching_conf_thr, shared_intrinsics=shared_intrinsics, output_path=output_path)
-    if not sparse_ga.recon_file_path:
-        if image_path:
-            print(f"Matching failed for {image_path}!")
-        else:
-            print(f"Matching failed for '{query_text}'!")
-        return
-    mask1, mask2 = sparse_ga.masks
-    dinov2_score = get_dinov2_score(img_paths[0], img_paths[1], sparse_ga.cache_path, mask1, mask2)
-    sparse_ga.dinov2_score = dinov2_score
-    wandb_log = {
-        "mast3r_results": wandb.Object3D(open(sparse_ga.recon_file_path)),
-        "input images": images,
-        "num_views": len(images),
-        "min_conf_thr": min_conf_thr,
-        "matching_conf_thr": matching_conf_thr,
-        "dinov2_score": dinov2_score,
-    }
+    imgs = [response["image"] for response in responses]
+    if not img_paths or not imgs: return []
+    unique_pairs = []
+    img1_path = img_paths[0]
+    img1 = imgs[0]
+    n = len(img_paths)
+    # Iterate over each path
+    for i in range(1, len(img_paths)):
+        if img_paths[i] == img1_path or np.array_equal(imgs[i], img1):
+            continue
+        unique_pairs.append([img1_path, img_paths[i]])
+    return unique_pairs
 
-    if indice_name == "co3d":
-        gt_R = [response["R"] for response in responses]
-        gt_T = [response["T"] for response in responses]
-        pred_R = [cam2w[:3, :3].cpu() for cam2w in sparse_ga.cam2w]
-        pred_T = [cam2w[3:, 3:].cpu() for cam2w in sparse_ga.cam2w]
-        R_transform_err, T_transform_err, R_err, T_err = get_errors(pred_R, pred_T, gt_R, gt_T)
-        wandb_log.update({
-            "image paths":str(img_paths),
-            "query_image_path":image_path,
-            "R_transform_err":R_transform_err,
-            "T_transform_err":T_transform_err,
-            "R_cam0_err":R_err[0],
-            "T_cam0_err":T_err[0],
-            "R_cam1_err": R_err[1],
-            "T_cam1_err": T_err[1],
-        })
-    wandb.log(wandb_log)
-    return sparse_ga
-
-def download_images_from_datacomp(output_path, query_texts=None, query_img_paths=None, num_responses=10,):
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    download_dir = os.path.join(output_path, f"downloaded_images_{timestamp}")
+def generate_all_unique_pairs(responses):
+    img_paths = [response["image_path"] for response in responses]
+    imgs = [response["image"] for response in responses]
     
-    os.makedirs(download_dir, exist_ok=True)
-    if query_texts:
-        for query_text in query_texts:
-            query_dir = query_text.replace(" ", "_")
-            query_path = os.path.join(download_dir, query_dir)
-            os.makedirs(query_path, exist_ok=True)
-            for i in range(0, num_responses-1):
-                send_query(None, [i, i+1], query_text=query_text, num_responses = num_responses, indice_name="datacomp", image_cache_path=query_path)
-    
-    else:
-        for img_idx, query_img_path in enumerate(query_img_paths):
-            query_path = os.path.join(download_dir, str(img_idx))
-            os.makedirs(query_path, exist_ok=True)
-            for i in range(0, num_responses-1):
-                send_query(image_path=query_img_path, response_idxs=[i, i+1], num_responses = num_responses, indice_name="datacomp", image_cache_path=query_path)
+    unique_pairs = []
+    n = len(img_paths)
+    # Iterate over each path
+    for i in range(n):
+        # Pair the current path with all subsequent paths to avoid duplicates
+        for j in range(i + 1, n):
+            # Check if the paths or images of the two pairs are identical; if so, skip this pair
+            if img_paths[i] == img_paths[j] or np.array_equal(imgs[i], imgs[j]):
+                continue
+            unique_pairs.append([img_paths[i], img_paths[j]])
+    return unique_pairs
 
 
-def get_dinov2_score(img1_path, img2_path, cache_path, mask1, mask2, device='cuda'):
-    processor = AutoImageProcessor.from_pretrained('facebook/dinov2-base')
-    dinov2_model = AutoModel.from_pretrained('facebook/dinov2-base').to(device)
-    
-    img1 = Image.open(img1_path)
-    img2 = Image.open(img2_path)
-    mask1 = torch.tensor(mask1, dtype=torch.bool, device=device)
-    mask2 = torch.tensor(mask2, dtype=torch.bool, device=device)
-    height, width = mask1.shape
+def aggregate_scores(scores):
+    # Extract all keys
+    keys = list(scores[0].keys())
 
-    
-    inputs1 = processor(images=img1, return_tensors="pt").to(device)
-    out1 = dinov2_model(**inputs1)
-    last_hidden1 = out1[0]
-    
-    inputs2 = processor(images=img2, return_tensors="pt").to(device)
-    last_hidden2 = dinov2_model(**inputs2)[0]
+    # Collect values for each key across all dictionaries
+    key_values = {key: [score[key] for score in scores] for key in keys}
+    num_scores = len(scores)
 
-    # Remove the [CLS] token
-    last_hidden1 = last_hidden1[:, 1:, :]  # Shape: [1, 256, 768]
-    last_hidden2 = last_hidden2[:, 1:, :]  # Shape: [1, 256, 768]
+    import numpy as np
+    from scipy.stats import rankdata
 
-    # Reshape to a square grid (assuming 14x14 patches)
-    patch_size = 16
-    feautre_dim = last_hidden1.shape[-1]
-    reshaped_output1 = last_hidden1.reshape(1, patch_size, patch_size, feautre_dim)
-    reshaped_output1 = reshaped_output1.permute(0, 3, 1, 2)
-    reshaped_output1 = F.interpolate(reshaped_output1, size=(height, width), mode='bilinear')
-    reshaped_output2 = last_hidden2.reshape(1, patch_size, patch_size, feautre_dim)
-    reshaped_output2 = reshaped_output2.permute(0, 3, 1, 2)
-    reshaped_output2 = F.interpolate(reshaped_output2, size=(height, width), mode='bilinear')
-    
-    """
-    [
-        [conf_score, sum of point-wise conf, number of mutual nn pairs],
-        [xy1, xy2, point-wise conf]
-    ]
-    """
-    xy1, xy2, _ = torch.load(cache_path)[1]
-    # Create boolean masks for valid points
-    valid_mask1 = mask1[xy1[:, 1], xy1[:, 0]]
-    valid_mask2 = mask2[xy2[:, 1], xy2[:, 0]]
+    for key in keys:
+        values = np.array(key_values[key])
 
-    # Combine masks
-    valid_mask = valid_mask1 & valid_mask2
+        # Calculate percentiles
+        ranks = rankdata(values, method='average')
+        percentiles = (ranks - 1) / max(1, (num_scores - 1)) * 100  # Convert ranks to percentiles
 
-    # Apply the mask to get the filtered coordinates
-    masked_xy1 = xy1[valid_mask]
-    masked_xy2 = xy2[valid_mask]
-        
-    # Extract features for xy1 from reshaped_output1
-    features1 = reshaped_output1[0, :, masked_xy1[:, 1], masked_xy1[:, 0]]   
+        # Calculate ascending order indices
+        asc_order = np.argsort(values)
+        asc_ranks = np.empty_like(asc_order)
+        asc_ranks[asc_order] = np.arange(num_scores)
 
-    # Extract features for xy2 from reshaped_output2
-    features2 = reshaped_output2[0, :, masked_xy2[:, 1], masked_xy2[:, 0]]
+        # Calculate descending order indices
+        desc_order = np.argsort(-values)
+        desc_ranks = np.empty_like(desc_order)
+        desc_ranks[desc_order] = np.arange(num_scores)
 
-    similarity = F.cosine_similarity(features1, features2, dim=0)
-    similarity_score = similarity.mean()
+        # Update each dictionary with the new keys
+        for idx, score in enumerate(scores):
+            score[f'{key}_percentile'] = percentiles[idx]
+            score[f'{key}_asc_rank'] = int(asc_ranks[idx])
+            score[f'{key}_desc_rank'] = int(desc_ranks[idx])
 
-    return similarity_score.item()
-
-
-def create_html(img1_paths, img2_paths, model_paths, scores, output_html_dir):
+def create_html(img1_paths, img2_paths, model_paths, scores, output_html_dir, query_texts=[]):
     data_list = []
+    score_names = list(scores[0].keys())
+    aggregate_scores(scores) #in-place operation
     current_file_path = os.path.abspath(__file__)
     for idx in range(len(img1_paths)):
         img1_path = img1_paths[idx]
@@ -523,81 +474,52 @@ def create_html(img1_paths, img2_paths, model_paths, scores, output_html_dir):
             'inputImage1': os.path.relpath(img1_path, current_file_path),
             'inputImage2': os.path.relpath(img2_path, current_file_path),
             'reconstructionFile': os.path.relpath(model_paths[idx], current_file_path),
-            'score': scores[idx]
+            'scores': scores[idx],
+            'score_names': score_names,
         }
+        if query_texts and query_texts[idx]: data_item['query_text'] = query_texts[idx]
         data_list.append(data_item)
 
-    data_json = json.dumps(data_list, indent=2)
-    template_html = "template2.html"
+    # Save the data to a JSON file
+    current_time = datetime.now()
+    timestamp_str = current_time.strftime("%Y%m%d_%H%M%S")
+    json_filename = f'data_{timestamp_str}.json'
+    json_filepath = os.path.join(output_html_dir, json_filename)
+    with open(json_filepath, 'w', encoding='utf-8') as json_file:
+        json.dump(data_list, json_file, indent=2)
+
+    
+    template_html = os.path.join(output_html_dir,"template.html")
     with open(template_html, 'r', encoding='utf-8') as f:
         html_template = f.read()
         html_output = html_template.replace(
-            'const mockData = Array.from({ length: 1000 }, (_, i) => ({}));',
-            f'const mockData = {data_json};'
+            "const dataFilePath = 'path.json';",
+            f'const dataFilePath = "{json_filename}";'
         )
-    
-    current_time = datetime.now()
-    timestamp_str = current_time.strftime("%Y%m%d_%H%M%S")
+
     output_html_path = os.path.join(output_html_dir, f'{timestamp_str}.html')
     with open(output_html_path, 'w', encoding='utf-8') as f:
         f.write(html_output)
     print(f'Generated {output_html_path} successfully.')
 
-
-if __name__ == "__main__":
-
-    """
-    Run MASt3R on sample images.
-    """
-    # model = init_mast3r()
-    # sparse_ga = run_reconstruction(model, ["/viscam/u/iamisaac/mast3r/assets/NLE_tower/1AD85EF5-B651-4291-A5C0-7BDB7D966384-83120-000041DADF639E09.jpg", "/viscam/u/iamisaac/mast3r/assets/NLE_tower/01D90321-69C8-439F-B0B0-E87E7634741C-83120-000041DAE419D7AE.jpg"], output_path="/viscam/u/iamisaac/mast3r/mast3r_outputs/")
+def pil_to_tensor(image_path, normalize=True):
+    # Open the image file
+    img = Image.open(image_path).convert('RGB')
 
     
-    # mask1, mask2 = sparse_ga.masks
-    # dinov2_similarity_score = get_dinov2_score("/viscam/u/iamisaac/mast3r/assets/NLE_tower/1AD85EF5-B651-4291-A5C0-7BDB7D966384-83120-000041DADF639E09.jpg", "/viscam/u/iamisaac/mast3r/assets/NLE_tower/01D90321-69C8-439F-B0B0-E87E7634741C-83120-000041DAE419D7AE.jpg", '/viscam/u/iamisaac/mast3r/mast3r_outputs/cache/corres_conf=desc_conf_subsample=8/7ee44180fd32b86548652184fe861e1c-b39877bbcbc90d4b6f93de98e8b85243.pth', mask1, mask2)
+    # Define the transformation pipeline
+    transform_list = [
+        transforms.ToTensor()
+    ]
     
-    # create_html([sparse_ga.img_paths[0]] *10, [sparse_ga.img_paths[1]] *10, [sparse_ga.recon_file_path] *10, [dinov2_similarity_score] *10, "/viscam/u/iamisaac/mast3r/htmls")
-
-    """
-    Performs 3D reconstruction using MASt3R on multiple query images.
-    For each image, retrieves similar images from DataComp and runs reconstruction with varying thresholds.
-    Logs results and 3D reconstructions to wandb for analysis and visualization.
-    """
-    model = init_mast3r()
-    num_responses = 20
-    threshold = 2.0
-    json_file_path = 'query_img_paths.json'
-    with open(json_file_path, 'r') as file:
-        data = json.load(file)
-    query_img_paths = [item['path'] for item in data['query_img_paths']]
-
-    output_path = "mast3r_results"
-    img1_paths = []
-    img2_paths = []
-    glb_model_paths = []
-    dinov2_scores = []
-    for query_img_path in query_img_paths:
-        for i in range(0, num_responses):
-            sparse_ga = run_mast3r_from_clip_retrieval(model, output_path=output_path, image_path=query_img_path,
-                                        num_responses=num_responses, response_idxs=[i], indice_name="datacomp", display_images=True, min_conf_thr=threshold, include_query_image=True, image_cache_path=output_path)
-            if not sparse_ga:
-                continue
-            img1_paths.append(sparse_ga.img_paths[0])
-            img2_paths.append(sparse_ga.img_paths[1])
-            glb_model_paths.append(sparse_ga.recon_file_path)
-            dinov2_scores.append(sparse_ga.dinov2_score)
-    create_html(img1_paths, img2_paths, glb_model_paths, dinov2_scores, "/viscam/u/iamisaac/mast3r/htmls")
-
-
-    """
-    Run MASt3R on CO3D dataset cars.
-    """
-    # car_dir = "/viscam/u/iamisaac/sfs/co3d_data/car/"
-    # for d in os.listdir(car_dir):
-    #     if os.path.isdir(os.path.join(car_dir, d)) and d[:2].isnumeric():
-    #         dir_path = os.path.join(car_dir, d, "images")
-    #         for file in os.listdir(dir_path)[0::50]:
-    #             full_path = os.path.join(dir_path, file)
-    #             run_mast3r_from_clip_retrieval(model, "/viscam/projects/sfs/mast3r_outputs/test1", image_path=full_path,
-    #                                            num_responses=110, response_stride=100)
-    #             break
+    # Add normalization if requested
+    if normalize:
+        transform_list.append(transforms.Normalize(mean=[0.48145466, 0.4578275, 0.40821073],
+                                                   std=[0.26862954, 0.26130258, 0.27577711]))
+    
+    transform = transforms.Compose(transform_list)
+    
+    # Apply the transformation
+    tensor = transform(img)
+    
+    return tensor
