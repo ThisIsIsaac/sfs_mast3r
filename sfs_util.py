@@ -38,7 +38,13 @@ from pygltflib import GLTF2
 from scipy.spatial.transform import Rotation as Rscipy
 import hashlib
 from torchvision import transforms
-
+import trimesh
+import numpy as np
+from PIL import Image
+import torch
+import torch.nn.functional as F
+import pyrender
+    
 MIN_IMG_SIZE = 64
 
 def viz_matches(mast3r_output, matches_im0, matches_im1, n_viz = 20):
@@ -523,3 +529,302 @@ def pil_to_tensor(image_path, normalize=True):
     tensor = transform(img)
     
     return tensor
+
+import h5py
+import numpy as np
+import json
+from tqdm import tqdm
+
+def download_random_imgs(h5_file_path, k, json_file_name='random_urls.json', dataset_name='dataset'):
+    """
+    Select k random rows from an HDF5 file.
+
+    Parameters:
+    file_path (str): Path to the HDF5 file
+    k (int): Number of random rows to select
+    dataset_name (str): Name of the dataset in the HDF5 file (default: 'default_dataset')
+
+    Returns:
+    numpy.ndarray: Array containing k randomly selected rows
+    """
+    if not os.path.exists(json_file_name):
+        print(f"Creating {json_file_name}!")
+        with h5py.File(h5_file_path, 'r') as f:
+            # Get the dataset
+            dataset = f[dataset_name]["url"]
+
+            # Get the total number of rows
+            total_rows = dataset.shape[0]
+            
+            if total_rows < k:
+                raise ValueError(f"total rows: {total_rows} is smaller than k: {k}")
+            
+            # Generate k random indices
+            random_indices = np.random.choice(total_rows, k, replace=False)
+            print(f"k = {k}")
+
+            sorted_indices = np.sort(random_indices)
+
+            # Retrieve the data corresponding to the sorted indices
+            random_rows = [dataset[i].decode('utf-8') for i in tqdm(sorted_indices, desc="Decoding URLs")]
+    with open(url_file_name, "r") as file:
+        urls = json.load(file)
+
+    img_dir = os.path.splitext(os.path.basename(json_file_name))[0]
+    num_failed = 0
+    num_succeeded = 0
+    download_path = os.path.join("/viscam/projects/sfs/mast3r/mast3r_outputs/", img_dir)
+    os.makedirs(download_path, exist_ok=True)
+    existing_imgs = get_existing_images(download_path)
+    for url in tqdm(urls, desc="Downloading image"):
+        try:
+            check_and_download_image(url, download_path, existing_imgs)
+            num_succeeded+=1
+            if num_succeeded == num_imgs:
+                break
+        except:
+            num_failed +=1
+        
+    print(f"num_succeeded = {num_succeeded}")
+        
+    # Convert the random rows to a list and save to a JSON file
+    with open(json_file_name, 'w') as json_file:
+        json.dump(random_rows, json_file)
+    return random_rows
+
+def generate_queries_from_json(json_file_path, base_output_dir, num_responses=5, indice_name="co3d"):
+    """
+    Reads a JSON file containing object categories and associated phrases,
+    creates a hierarchical directory structure with the object category as the parent
+    and each phrase as child directories (spaces replaced with underscores).
+    For each phrase, it runs `send_query` and saves the results in the corresponding directory.
+
+    Parameters:
+    - json_file_path (str): Path to the JSON file containing queries.
+    - base_output_dir (str): Base directory where the directories and images will be saved.
+    - num_responses (int): Number of images to retrieve for each query.
+    - indice_name (str): Index name to use in the send_query function.
+    """
+
+    import json
+    import os
+
+    # Load the JSON file containing the queries
+    with open(json_file_path, 'r') as f:
+        query_data = json.load(f)
+
+    # Iterate over each object category in the JSON data
+    for category, phrases in query_data.items():
+        # Replace spaces with underscores in the category name to form directory name
+        category_dir_name = category.replace(" ", "_")
+        category_dir = os.path.join(base_output_dir, category_dir_name)
+        # Create the category directory if it doesn't exist
+        os.makedirs(category_dir, exist_ok=True)
+
+        # Iterate over each phrase in the list associated with the category
+        for phrase in phrases:
+            # Replace spaces with underscores in the phrase to form the directory name
+            phrase_dir_name = phrase.replace(" ", "_")
+            phrase_dir = os.path.join(category_dir, phrase_dir_name)
+            # Create the phrase directory if it doesn't exist
+            os.makedirs(phrase_dir, exist_ok=True)
+
+            # Get existing images in the phrase directory to avoid re-downloading
+            existing_imgs = get_existing_images(phrase_dir)
+
+            # Run the send_query function with the current phrase and phrase directory as image_cache_path
+            try:
+                results = send_query(
+                    existing_imgs=existing_imgs,
+                    query_text=phrase,
+                    num_responses=num_responses,
+                    indice_name=indice_name,
+                    image_cache_path=phrase_dir
+                )
+                # Process the results as needed
+                print(f"Successfully retrieved images for phrase: '{phrase}' in category: '{category}'")
+            except Exception as e:
+                print(f"Error processing phrase '{phrase}' in category '{category}': {str(e)}")
+
+def calculate_ssim_psnr_lpips_from_glb(glb_file_path, ground_truth_images, viewpoints, image_size=(256, 256)):
+    """
+    Calculates SSIM, PSNR, and LPIPS between rendered images of a GLB file and ground truth images.
+
+    Parameters:
+    - glb_file_path (str): Path to the GLB file.
+    - ground_truth_images (list of ndarray): List of ground truth images as NumPy arrays.
+    - viewpoints (list of dict): List of viewpoints with camera parameters for rendering.
+    - image_size (tuple): Size of the rendered images (width, height).
+
+    Returns:
+    - metrics (list of dict): List containing SSIM, PSNR, and LPIPS values for each viewpoint.
+    """
+    import trimesh
+    import numpy as np
+    from PIL import Image
+    from skimage.metrics import structural_similarity as compare_ssim
+    from skimage.metrics import peak_signal_noise_ratio as compare_psnr
+    import torch
+    import lpips
+    import pyrender
+
+    # Load the 3D model using trimesh
+    mesh = trimesh.load(glb_file_path)
+    scene = pyrender.Scene()
+    mesh = pyrender.Mesh.from_trimesh(mesh)
+    scene.add(mesh)
+
+    # Initialize LPIPS model (using AlexNet backbone for speed)
+    lpips_model = lpips.LPIPS(net='alex').cuda()
+
+    metrics = []
+
+    for idx, viewpoint in enumerate(viewpoints):
+        # Set up the camera
+        camera = pyrender.IntrinsicsCamera(fx=viewpoint['fx'],
+                                           fy=viewpoint['fy'],
+                                           cx=viewpoint['cx'],
+                                           cy=viewpoint['cy'])
+        camera_pose = viewpoint['pose']
+
+        # Add camera to the scene
+        cam_node = scene.add(camera, pose=camera_pose)
+
+        # Set up the renderer
+        r = pyrender.OffscreenRenderer(viewport_width=image_size[0],
+                                       viewport_height=image_size[1])
+
+        # Render the scene
+        color, _ = r.render(scene)
+
+        # Remove the camera from the scene for the next iteration
+        scene.remove_node(cam_node)
+
+        # Convert rendered image to grayscale for SSIM and PSNR
+        rendered_image = Image.fromarray(color).convert('RGB')
+        rendered_gray = rendered_image.convert('L')
+        rendered_array = np.array(rendered_gray)
+
+        # Get the corresponding ground truth image
+        gt_image = Image.fromarray(ground_truth_images[idx]).convert('RGB')
+        gt_gray = gt_image.convert('L')
+        gt_gray = gt_gray.resize(image_size, Image.BILINEAR)
+        gt_array = np.array(gt_gray)
+
+        # Compute SSIM
+        ssim_value = compare_ssim(gt_array, rendered_array, data_range=rendered_array.max() - rendered_array.min())
+
+        # Compute PSNR
+        psnr_value = compare_psnr(gt_array, rendered_array, data_range=rendered_array.max() - rendered_array.min())
+
+        # Prepare images for LPIPS (normalized tensors)
+        transform = transforms.Compose([
+            transforms.Resize(image_size),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5],
+                                 std=[0.5, 0.5, 0.5])
+        ])
+
+        # Transform and move to GPU
+        rendered_tensor = transform(rendered_image).unsqueeze(0).cuda()
+        gt_tensor = transform(gt_image).unsqueeze(0).cuda()
+
+        # Compute LPIPS
+        with torch.no_grad():
+            lpips_value = lpips_model(rendered_tensor, gt_tensor).item()
+
+        # Collect metrics
+        metrics.append({
+            'ssim': ssim_value,
+            'psnr': psnr_value,
+            'lpips': lpips_value
+        })
+
+    return metrics
+
+def calculate_photometric_loss(image1_path, image2_path, glb_file_path, camera_params, image_size=(256, 256)):
+    """
+    Calculates the photometric consistency loss between two input images and rendered images from a GLB file.
+
+    Parameters:
+    - image1_path (str): Path to the first input image.
+    - image2_path (str): Path to the second input image.
+    - glb_file_path (str): Path to the GLB file containing the 3D model.
+    - camera_params (list of dict): List containing camera parameters for both images.
+      Each dict should have keys 'fx', 'fy', 'cx', 'cy', and 'pose' (4x4 numpy array).
+    - image_size (tuple): The size (width, height) to which images will be resized.
+
+    Returns:
+    - photometric_loss (float): The computed photometric consistency loss.
+    """
+
+    # Load the 3D model
+    mesh = trimesh.load(glb_file_path)
+    scene = pyrender.Scene()
+    mesh = pyrender.Mesh.from_trimesh(mesh)
+    scene.add(mesh)
+
+    # Load and preprocess input images
+    transform = transforms.Compose([
+        transforms.Resize(image_size),
+        transforms.ToTensor()
+    ])
+
+    image1 = Image.open(image1_path).convert('RGB')
+    image1 = transform(image1).unsqueeze(0)  # Shape: [1, 3, H, W]
+
+    image2 = Image.open(image2_path).convert('RGB')
+    image2 = transform(image2).unsqueeze(0)  # Shape: [1, 3, H, W]
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    image1 = image1.to(device)
+    image2 = image2.to(device)
+
+    # Placeholder for rendered images
+    rendered_images = []
+
+    # Render the GLB model from both viewpoints
+    r = pyrender.OffscreenRenderer(viewport_width=image_size[0],
+                                   viewport_height=image_size[1])
+
+    for idx, params in enumerate(camera_params):
+        # Set up the camera
+        camera = pyrender.IntrinsicsCamera(fx=params['fx'],
+                                           fy=params['fy'],
+                                           cx=params['cx'],
+                                           cy=params['cy'])
+        camera_pose = params['pose']
+
+        # Add camera to the scene
+        cam_node = scene.add(camera, pose=camera_pose)
+
+        # Render the scene
+        color, _ = r.render(scene)
+
+        # Remove the camera from the scene for the next iteration
+        scene.remove_node(cam_node)
+
+        # Preprocess rendered image
+        rendered_image = Image.fromarray(color).convert('RGB')
+        rendered_image = transform(rendered_image).unsqueeze(0).to(device)
+
+        rendered_images.append(rendered_image)
+
+    # Compute photometric loss between input images and rendered images
+    loss_fn = torch.nn.L1Loss()
+
+    loss1 = loss_fn(image1, rendered_images[0])
+    loss2 = loss_fn(image2, rendered_images[1])
+
+    # Total photometric loss
+    photometric_loss = (loss1 + loss2) / 2.0
+
+    return photometric_loss.item()
+
+if __name__ == "__main__":
+    num_imgs=100_000
+    url_file_name="random_urls_500k.json"
+    download_path = "/viscam/projects/sfs/mast3r/mast3r_outputs/random_urls_500k"
+    download_random_imgs(h5_file_path="/viscam/u/iamisaac/datacomp/small_merged/metadata.hdf5", k=num_imgs*5, json_file_name=url_file_name)
+    
+    generate_queries_from_json()

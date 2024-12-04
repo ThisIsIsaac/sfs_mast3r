@@ -25,11 +25,9 @@ import torch.nn.functional as F
 import json
 from pygltflib import GLTF2
 import sfs_util
-from torchmetrics.multimodal.clip_score import CLIPScore
 import clip
-import numpy as np
 from datetime import datetime
-import random
+from tqdm import tqdm
 
 class Mast3r():
     def __init__(self, 
@@ -44,7 +42,7 @@ class Mast3r():
         self.device=device
         self.img_dir = img_dir
         self.output_path = output_path
-        self.existing_imgs = sfs_util.get_existing_images(img_dir);
+        self.existing_imgs = sfs_util.get_existing_images(img_dir)
         self.model = init_mast3r()
         self.min_conf_threshold = min_conf_threshold
         self.num_responses_per_query = num_responses_per_query
@@ -87,7 +85,6 @@ class Mast3r():
         if scores:
             sfs_util.create_html(img1_paths, img2_paths, glb_model_paths, scores, self.html_dir)
         self.delete_caches(all_cache_paths)
-        
     
     def run_with_query_texts_file(self, query_text_json_file_path):
         if query_text_json_file_path:
@@ -208,7 +205,7 @@ class Mast3r():
         clip_results = []
         bottom_k_scores = []
 
-        for img_path in img_paths:
+        for img_path in tqdm(img_paths):
             scores = {}
             # img = torch.from_numpy(np.array(img)).to(self.device)
             raw_img = Image.open(img_path)
@@ -473,6 +470,8 @@ def aggregate_scores(scores):
             score[f'{key}_desc_rank'] = int(desc_ranks[idx])
 
 
+
+
 if __name__ == "__main__":
     # with open("random_urls.json", "r") as file:
     #     urls = json.load(file)
@@ -489,17 +488,24 @@ if __name__ == "__main__":
     # mast3r.get_clip_scores([img1, img2], clip_keywords, 10)
     # mast3r.run_with_urls(urls, 200)
     
-    # mast3r = Mast3r(
-    #     min_conf_threshold = 1.0,
-    #     matching_conf_threshold = 2.0
-    # )
-    # mast3r.run_with_query_texts_file("clip_query_texts.json")
+    mast3r = Mast3r(
+        min_conf_threshold = 1.0,
+        matching_conf_threshold = 2.0
+    )
+    mast3r.run_with_query_texts_file("clip_query_texts.json")
     # mast3r.matching_conf_threshold = 1.0
     # mast3r.run_with_query_texts_file("clip_query_texts.json")
+
+    # select_random_rows("/viscam/u/iamisaac/datacomp/small_merged/metadata.hdf5", num_imgs*5, url_file_name)
+    # print("created json file!@")
+
+
+        
+    
     mast3r = Mast3r()
     with open("/viscam/projects/sfs/mast3r/clip_scores/clip_keywords.json", 'r') as file:
         json_file = json.load(file)
         keywords = json_file["keywords"]
-    img_paths = random.sample([entry.path for entry in os.scandir("/viscam/projects/sfs/mast3r/mast3r_outputs/random_imgs") if entry.is_file() and entry.name.endswith('.jpg')], k=500)
+    img_paths = [entry.path for entry in os.scandir("/viscam/projects/sfs/mast3r/mast3r_outputs/random_urls_500k") if entry.is_file() and entry.name.endswith('.jpg')]
     
     mast3r.get_clip_scores(img_paths, keywords, 1)

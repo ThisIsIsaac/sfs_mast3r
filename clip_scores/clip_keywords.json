@@ -5,14 +5,12 @@
         "logo",
         "contains text",
         "food",
-        "bug",
         "people",
         "roadsigns",
         "graph",
         "computer graphic",
         "anime character",
         "blurry",
-        "low resolution",
         "animal",
         "multiple objects",
         "only background",
@@ -31,6 +29,7 @@
         "black and white",
         "placeholder",
         "no foreground object",
-        "person"
+        "home interior",
+        "edited"
     ]
 }
